@@ -4,6 +4,7 @@ import os
 import numpy as np
 from pydub import AudioSegment
 import click
+import csv
 
 def detect_silence_ranges(audio_segment, silence_thresh=-40, min_silence_len=500):
     """Detect silence ranges in the audio segment."""
@@ -133,11 +134,21 @@ def split_audio_at_silence(audio, base_filename, min_duration=10000, max_duratio
     output_dir = os.path.join('result', base_filename, 'split')
     os.makedirs(output_dir, exist_ok=True)
     
-    # Export chunks
-    for i, chunk in enumerate(adjusted_chunks):
-        output_path = os.path.join(output_dir, f"{base_filename}_segment_{i:03d}.ogg")
-        chunk.export(output_path, format="ogg")
-        click.echo(f"Exported: {output_path} (Duration: {len(chunk)/1000:.2f}s)")
+    # Prepare CSV file
+    csv_file_path = os.path.join('result', base_filename, f'{base_filename}_transcripts.csv')
+    with open(csv_file_path, mode='w', newline='') as csv_file:
+        csv_writer = csv.writer(csv_file)
+        csv_writer.writerow(['audio_file', 'start_time_seconds', 'end_time_seconds', 'duration_seconds'])
+        
+        # Export chunks and record details
+        for i, chunk in enumerate(adjusted_chunks):
+            output_path = os.path.join(output_dir, f"{base_filename}_segment_{i:03d}.ogg")
+            chunk.export(output_path, format="ogg")
+            start_time = (i * min_duration) / 1000
+            end_time = start_time + len(chunk) / 1000
+            duration = len(chunk) / 1000
+            csv_writer.writerow([os.path.relpath(output_path, start=os.path.dirname(csv_file_path)), start_time, end_time, duration])
+            click.echo(f"Exported: {output_path} (Duration: {duration:.2f}s)")
     
     click.echo("\nSplitting complete!")
 
