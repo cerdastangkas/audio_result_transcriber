@@ -32,8 +32,8 @@ sudo apt-get install ffmpeg
 
 1. Clone the repository:
 ```bash
-git clone [repository-url]
-cd result_transcription
+git clone git@github.com:cerdastangkas/audio_result_transcriber.git
+cd audio_result_transcriber
 ```
 
 2. Create and activate a virtual environment:
