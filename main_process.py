@@ -2,6 +2,7 @@ import os
 import click
 from audio_splitter import split_audio_at_silence
 from transcribe_chunks import transcribe_chunks
+from convert_and_clean import convert_chunks_to_wav
 from pydub import AudioSegment
 
 # Main function to process audio file
@@ -20,6 +21,10 @@ def process_audio_file(input_file):
     # Transcribe chunks
     print("Transcribing audio chunks...")
     transcribe_chunks(base_filename)
+
+    # Convert audio chunks to WAV and clean up
+    print("Converting audio chunks to WAV and cleaning up...")
+    convert_chunks_to_wav(base_filename)
 
     print("Process complete!")
 
