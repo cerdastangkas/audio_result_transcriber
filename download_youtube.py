@@ -130,18 +130,13 @@ def download_audio(youtube_id, download_dir):
 
 def process_excel_file(excel_path):
     """
-    Process Excel file containing YouTube IDs.
+    Process an Excel file containing YouTube video IDs.
     
     Args:
-        excel_path (str): Path to Excel file
+        excel_path (str): Path to Excel file containing YouTube video IDs
     """
-    # Create download directory
-    download_dir = setup_download_directory()
-    logger.info(f"Download directory: {download_dir}")
-    
     try:
         # Read Excel file
-        logger.info(f"Reading Excel file: {excel_path}")
         df = pd.read_excel(excel_path)
         
         if 'id' not in df.columns:
@@ -149,53 +144,47 @@ def process_excel_file(excel_path):
         
         # Initialize processing_status column if it doesn't exist
         if 'processing_status' not in df.columns:
-            df['processing_status'] = ''
-            logger.info("Added 'processing_status' column to Excel file")
+            df['processing_status'] = 'pending'
         
-        # Get list of videos to process (excluding already downloaded ones)
-        to_process = []
-        for idx, row in df.iterrows():
-            youtube_id = str(row['id']).strip()
-            if not youtube_id:
-                logger.warning(f"Empty ID found at row {idx + 2}")
-                continue
+        # Get only pending videos
+        pending_videos = df[df['processing_status'].fillna('').str.lower() == 'pending']
+        
+        if pending_videos.empty:
+            logger.info("No pending videos found to process")
+            return
+            
+        logger.info(f"Found {len(pending_videos)} pending videos to process")
+        
+        # Create download directory if it doesn't exist
+        download_dir = os.path.join(BASE_DATA_FOLDER, 'download')
+        os.makedirs(download_dir, exist_ok=True)
+        
+        # Process each video
+        success_count = 0
+        for _, row in pending_videos.iterrows():
+            video_id = str(row['id']).strip()
+            
+            try:
+                success, output_file, error = download_audio(video_id, download_dir)
                 
-            current_status = str(row.get('processing_status', '')).lower()
-            if current_status == 'downloaded':
-                logger.info(f"Skipping {youtube_id} - already downloaded")
-                continue
-                
-            to_process.append((idx, youtube_id))
+                if success:
+                    success_count += 1
+                    # Update status to 'downloaded' in the dataframe
+                    df.loc[df['id'] == video_id, 'processing_status'] = 'downloaded'
+                else:
+                    # Update status to 'failed' and store error message
+                    df.loc[df['id'] == video_id, 'processing_status'] = f'failed: {error}'
+                    
+            except Exception as e:
+                logger.error(f"Error processing video {video_id}: {str(e)}")
+                df.loc[df['id'] == video_id, 'processing_status'] = f'failed: {str(e)}'
         
-        logger.info(f"Found {len(to_process)} videos to process")
-        
-        # Process videos
-        results = []
-        for idx, youtube_id in to_process:
-            success, output_file, error = download_audio(youtube_id, download_dir)
-            
-            result = {
-                'youtube_id': youtube_id,
-                'success': success,
-                'output_file': output_file if success else None,
-                'error': error if not success else None
-            }
-            results.append(result)
-            
-            if success:
-                # Update processing_status in the DataFrame
-                df.at[idx, 'processing_status'] = 'downloaded'
-                # Save the updated Excel file after each successful download
-                df.to_excel(excel_path, index=False)
-            
-        # Create summary DataFrame
-        summary_df = pd.DataFrame(results)
-        summary_path = os.path.join(download_dir, 'download_summary.xlsx')
-        summary_df.to_excel(summary_path, index=False)
-        logger.info(f"Download summary saved to: {summary_path}")
+        # Save updated Excel file
+        df.to_excel(excel_path, index=False)
+        logger.info(f"Successfully downloaded {success_count} out of {len(pending_videos)} pending videos")
         
     except Exception as e:
-        logger.error(f"Error processing Excel file: {e}")
+        logger.error(f"Error processing Excel file: {str(e)}")
         raise
 
 if __name__ == "__main__":

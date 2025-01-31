@@ -7,3 +7,5 @@ tqdm==4.67.1
 yt-dlp>=2023.12.30
 pandas>=2.1.4
 openpyxl>=3.1.2
+humanize==4.11.0
+streamlit==1.41.1
