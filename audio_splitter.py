@@ -11,6 +11,11 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from tqdm import tqdm
 import multiprocessing
 
+from dotenv import load_dotenv
+load_dotenv()
+
+BASE_DATA_FOLDER = os.getenv('BASE_DATA_FOLDER')
+
 def detect_silence_ranges(audio_segment, silence_thresh=-40, min_silence_len=500):
     """Detect silence ranges in the audio segment."""
     silence_ranges = []
@@ -128,7 +133,7 @@ def split_audio_ffmpeg(input_file, output_dir, base_filename, min_duration=10, m
     os.makedirs(output_dir, exist_ok=True)
     
     # Prepare CSV file
-    csv_file_path = os.path.join('result', base_filename, f'{base_filename}_transcripts.csv')
+    csv_file_path = os.path.join(BASE_DATA_FOLDER, 'result', base_filename, f'{base_filename}_transcripts.csv')
     os.makedirs(os.path.dirname(csv_file_path), exist_ok=True)
     
     # Detect silence points
@@ -232,7 +237,7 @@ def split_audio_ffmpeg(input_file, output_dir, base_filename, min_duration=10, m
 
 def split_audio_at_silence(audio_or_path, base_filename, min_duration=10000, max_duration=15000, silence_thresh=-40, min_silence_len=500, crossfade=500):
     """Split audio into chunks between 10-15 seconds at silence points."""
-    output_dir = os.path.join('result', base_filename, 'split')
+    output_dir = os.path.join(BASE_DATA_FOLDER, 'result', base_filename, 'split')
     
     if isinstance(audio_or_path, str):
         # If input is a file path, use FFmpeg-based splitting
@@ -293,7 +298,7 @@ def split_audio_at_silence(audio_or_path, base_filename, min_duration=10000, max
         # Export chunks
         os.makedirs(output_dir, exist_ok=True)
         
-        csv_file_path = os.path.join('result', base_filename, f'{base_filename}_transcripts.csv')
+        csv_file_path = os.path.join(BASE_DATA_FOLDER, 'result', base_filename, f'{base_filename}_transcripts.csv')
         with open(csv_file_path, mode='w', newline='') as csv_file:
             csv_writer = csv.writer(csv_file)
             csv_writer.writerow(['audio_file', 'start_time_seconds', 'end_time_seconds', 'duration_seconds'])

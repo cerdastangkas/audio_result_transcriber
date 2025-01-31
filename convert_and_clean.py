@@ -5,6 +5,11 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from tqdm import tqdm
 import multiprocessing
 
+from dotenv import load_dotenv
+load_dotenv()
+
+BASE_DATA_FOLDER = os.getenv('BASE_DATA_FOLDER')
+
 def convert_audio_file(args):
     """Convert a single audio file to WAV using FFmpeg."""
     input_file, output_file = args
@@ -33,8 +38,8 @@ def convert_audio_file(args):
 
 def convert_chunks_to_wav(base_filename):
     """Convert all audio chunks to WAV format in parallel."""
-    input_dir = os.path.join('result', base_filename, 'split')
-    csv_file_path = os.path.join('result', base_filename, f'{base_filename}_transcripts.csv')
+    input_dir = os.path.join(BASE_DATA_FOLDER, 'result', base_filename, 'split')
+    csv_file_path = os.path.join(BASE_DATA_FOLDER, 'result', base_filename, f'{base_filename}_transcripts.csv')
     
     # Read existing CSV data
     with open(csv_file_path, mode='r', newline='') as csv_file:
@@ -46,7 +51,7 @@ def convert_chunks_to_wav(base_filename):
     conversion_args = []
     for row in rows:
         if row['audio_file'].endswith('.ogg'):
-            input_file = os.path.join('result', base_filename, row['audio_file'])
+            input_file = os.path.join(BASE_DATA_FOLDER, 'result', base_filename, row['audio_file'])
             output_file = input_file.replace('.ogg', '.wav')
             conversion_args.append((input_file, output_file))
     

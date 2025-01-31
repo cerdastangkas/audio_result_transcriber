@@ -14,6 +14,7 @@ load_dotenv()
 
 # Get DeepInfra API key from environment variables
 DEEPINFRA_API_KEY = os.getenv('DEEPINFRA_API_KEY')
+BASE_DATA_FOLDER = os.getenv('BASE_DATA_FOLDER')
 
 # Configure session with retry logic
 def create_session():
@@ -53,8 +54,8 @@ def transcribe_audio_with_session(args):
 
 def transcribe_chunks(base_filename, model='openai/whisper-large'):
     """Transcribe all audio chunks in parallel and save to CSV."""
-    input_dir = os.path.join('result', base_filename, 'split')
-    csv_file_path = os.path.join('result', base_filename, f'{base_filename}_transcripts.csv')
+    input_dir = os.path.join(BASE_DATA_FOLDER, 'result', base_filename, 'split')
+    csv_file_path = os.path.join(BASE_DATA_FOLDER, 'result', base_filename, f'{base_filename}_transcripts.csv')
     
     # Read existing CSV
     with open(csv_file_path, mode='r', newline='') as csv_file:
@@ -66,7 +67,7 @@ def transcribe_chunks(base_filename, model='openai/whisper-large'):
     session = create_session()
     transcription_args = []
     for row in rows:
-        audio_file_path = os.path.join('result', base_filename, row['audio_file'])
+        audio_file_path = os.path.join(BASE_DATA_FOLDER, 'result', base_filename, row['audio_file'])
         transcription_args.append((session, audio_file_path, model))
     
     # Process transcriptions in parallel
@@ -92,7 +93,7 @@ def transcribe_chunks(base_filename, model='openai/whisper-large'):
     
     # Update rows with transcriptions
     for row in rows:
-        audio_file_path = os.path.join('result', base_filename, row['audio_file'])
+        audio_file_path = os.path.join(BASE_DATA_FOLDER, 'result', base_filename, row['audio_file'])
         row['text'] = successful_transcriptions.get(audio_file_path, '')
     
     # Write updated CSV
