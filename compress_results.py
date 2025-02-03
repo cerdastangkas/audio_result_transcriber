@@ -79,7 +79,7 @@ def compress_result_folders():
     # Process each folder
     for folder_name in folders:
         folder_path = os.path.join(result_dir, folder_name)
-        zip_path = os.path.join(result_dir, f"{folder_name}.zip")
+        zip_path = os.path.join(result_dir, f"{folder_name}_local_processing.zip")
         
         try:
             # Skip if zip already exists

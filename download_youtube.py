@@ -171,16 +171,19 @@ def process_excel_file(excel_path):
                     success_count += 1
                     # Update status to 'downloaded' in the dataframe
                     df.loc[df['id'] == video_id, 'processing_status'] = 'downloaded'
+                    # Save changes to Excel file after each successful download
+                    df.to_excel(excel_path, index=False)
                 else:
                     # Update status to 'failed' and store error message
                     df.loc[df['id'] == video_id, 'processing_status'] = f'failed: {error}'
+                    # Save changes to Excel file after failed download
+                    df.to_excel(excel_path, index=False)
                     
             except Exception as e:
                 logger.error(f"Error processing video {video_id}: {str(e)}")
                 df.loc[df['id'] == video_id, 'processing_status'] = f'failed: {str(e)}'
+                df.to_excel(excel_path, index=False)
         
-        # Save updated Excel file
-        df.to_excel(excel_path, index=False)
         logger.info(f"Successfully downloaded {success_count} out of {len(pending_videos)} pending videos")
         
     except Exception as e:
