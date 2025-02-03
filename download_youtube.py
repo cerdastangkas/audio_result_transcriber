@@ -8,6 +8,7 @@ import multiprocessing
 import time
 from utils.logger_setup import setup_error_logger
 import requests
+import re
 
 # Load environment variables
 load_dotenv()
@@ -23,6 +24,30 @@ error_logger = setup_error_logger('youtube_download')
 # Get environment variables
 BASE_DATA_FOLDER = os.getenv('BASE_DATA_FOLDER')
 YOUTUBE_API_KEY = os.getenv('YOUTUBE_API_KEY')
+
+def sanitize_error_message(error_msg):
+    """
+    Sanitize error message for Excel compatibility.
+    Remove or replace characters that cause issues in Excel.
+    """
+    if not error_msg:
+        return ""
+    
+    # Convert to string if not already
+    error_msg = str(error_msg)
+    
+    # Remove URLs and file paths
+    error_msg = re.sub(r'http[s]?://\S+', '[URL]', error_msg)
+    error_msg = re.sub(r'See\s+\S+\s+for', 'See documentation for', error_msg)
+    
+    # Remove any non-printable characters
+    error_msg = ''.join(char for char in error_msg if char.isprintable())
+    
+    # Truncate long messages
+    if len(error_msg) > 250:
+        error_msg = error_msg[:247] + "..."
+    
+    return error_msg
 
 def setup_download_directory():
     """Create download directory if it doesn't exist."""
@@ -90,7 +115,7 @@ def check_video_availability(video_id):
 
 def get_youtube_options(youtube_id, download_dir):
     """
-    Get YouTube-DL options with API key if available.
+    Get YouTube-DL options with cookie file from parent directory.
     
     Args:
         youtube_id (str): YouTube video ID
@@ -148,11 +173,10 @@ def get_youtube_options(youtube_id, download_dir):
                 pbar.set_description(f"Converting {youtube_id} to OGG")
                 
     ydl_opts = {
-        # Try to get opus/ogg format directly, fallback to any audio
         'format': 'bestaudio[ext=opus]/bestaudio[ext=ogg]/bestaudio',
         'postprocessors': [{
             'key': 'FFmpegExtractAudio',
-            'preferredcodec': 'vorbis',  # This will create .ogg file
+            'preferredcodec': 'vorbis',
             'preferredquality': '128',
         }],
         'outtmpl': output_template,
@@ -161,14 +185,24 @@ def get_youtube_options(youtube_id, download_dir):
         'no_warnings': True,
         'noprogress': True,
         'extract_audio': True,
-        # Optimize for speed
         'postprocessor_args': [
             '-threads', str(multiprocessing.cpu_count()),
             '-codec:a', 'libvorbis',
-            '-q:a', '3',  # Vorbis quality setting (0-10, 3 is good quality)
+            '-q:a', '3',
             '-ar', '44100',
         ],
     }
+    
+    # Look for cookies file in parent directory
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    parent_dir = os.path.dirname(current_dir)
+    cookies_file = os.path.join(parent_dir, 'youtube.cookies')
+    
+    if os.path.exists(cookies_file):
+        ydl_opts['cookiefile'] = cookies_file
+        logger.info(f"Using cookies file for authentication: {cookies_file}")
+    else:
+        logger.warning(f"No cookies file found at {cookies_file}. Some videos may be inaccessible.")
     
     return ydl_opts, pbar
 
@@ -183,13 +217,6 @@ def download_audio(youtube_id, download_dir):
     Returns:
         tuple: (success (bool), output_file (str), error_message (str))
     """
-    # First check video availability using API
-    is_available, error = check_video_availability(youtube_id)
-    if not is_available:
-        logger.error(f"Video {youtube_id} is not available: {error}")
-        error_logger.error(f"Video {youtube_id} is not available: {error}")
-        return False, None, error
-    
     url = f"https://www.youtube.com/watch?v={youtube_id}"
     ydl_opts, pbar = get_youtube_options(youtube_id, download_dir)
     
@@ -198,7 +225,8 @@ def download_audio(youtube_id, download_dir):
             ydl.download([url])
             if pbar:
                 pbar.close()
-        return True, f"{youtube_id}.ogg", None
+            return True, f"{youtube_id}.ogg", None
+            
     except Exception as e:
         if pbar:
             pbar.close()
@@ -229,9 +257,9 @@ def process_excel_file(excel_path):
         pending_videos = df[df['processing_status'].fillna('').str.lower() == 'pending']
         
         if pending_videos.empty:
-            logger.info("No pending videos found to process")
+            logger.info("No pending videos found in Excel file")
             return
-            
+        
         logger.info(f"Found {len(pending_videos)} pending videos to process")
         
         # Create download directory if it doesn't exist
@@ -239,33 +267,33 @@ def process_excel_file(excel_path):
         
         # Process each video
         success_count = 0
-        for _, row in pending_videos.iterrows():
-            video_id = str(row['id']).strip()
+        for index, row in pending_videos.iterrows():
+            video_id = row['id']
+            logger.info(f"\nProcessing video {video_id}")
             
+            success, output_file, error = download_audio(video_id, download_dir)
+            
+            # Update Excel with sanitized status
+            if success:
+                df.at[index, 'processing_status'] = 'downloaded'
+                success_count += 1
+            else:
+                # Sanitize error message before writing to Excel
+                sanitized_error = sanitize_error_message(error)
+                df.at[index, 'processing_status'] = f'failed: {sanitized_error}'
+            
+            # Save after each video in case of interruption
             try:
-                success, output_file, error = download_audio(video_id, download_dir)
-                
-                if success:
-                    success_count += 1
-                    # Update status to 'downloaded' in the dataframe
-                    df.loc[df['id'] == video_id, 'processing_status'] = 'downloaded'
-                    # Save changes to Excel file after each successful download
-                    df.to_excel(excel_path, index=False)
-                else:
-                    # Update status to 'failed' and store error message
-                    df.loc[df['id'] == video_id, 'processing_status'] = f'failed: {error}'
-                    # Save changes to Excel file after failed download
-                    df.to_excel(excel_path, index=False)
-                    
-            except Exception as e:
-                logger.error(f"Error processing video {video_id}: {str(e)}")
-                df.loc[df['id'] == video_id, 'processing_status'] = f'failed: {str(e)}'
                 df.to_excel(excel_path, index=False)
+            except Exception as e:
+                logger.error(f"Error saving Excel file: {e}")
+                error_logger.error(f"Error saving Excel file: {e}")
         
-        logger.info(f"Successfully downloaded {success_count} out of {len(pending_videos)} pending videos")
+        logger.info(f"\nProcessing complete. Successfully downloaded {success_count} out of {len(pending_videos)} videos")
         
     except Exception as e:
-        logger.error(f"Error processing Excel file: {str(e)}")
+        logger.error(f"Error processing Excel file: {e}")
+        error_logger.error(f"Error processing Excel file: {e}")
         raise
 
 if __name__ == "__main__":
