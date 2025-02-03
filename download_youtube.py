@@ -7,6 +7,7 @@ import logging
 import multiprocessing
 import time
 from utils.logger_setup import setup_error_logger
+import requests
 
 # Load environment variables
 load_dotenv()
@@ -21,8 +22,7 @@ error_logger = setup_error_logger('youtube_download')
 
 # Get environment variables
 BASE_DATA_FOLDER = os.getenv('BASE_DATA_FOLDER')
-YOUTUBE_USERNAME = os.getenv('YOUTUBE_USERNAME')
-YOUTUBE_PASSWORD = os.getenv('YOUTUBE_PASSWORD')
+YOUTUBE_API_KEY = os.getenv('YOUTUBE_API_KEY')
 
 def setup_download_directory():
     """Create download directory if it doesn't exist."""
@@ -36,9 +36,61 @@ def format_time(seconds):
     seconds = int(seconds % 60)
     return f"{minutes:02d}:{seconds:02d}"
 
+def check_video_availability(video_id):
+    """
+    Check if a video is available and accessible using YouTube Data API.
+    
+    Args:
+        video_id (str): YouTube video ID
+        
+    Returns:
+        tuple: (is_available (bool), error_message (str))
+    """
+    if not YOUTUBE_API_KEY:
+        logger.warning("No YouTube API key found. Skipping availability check.")
+        return True, None
+        
+    url = f"https://www.googleapis.com/youtube/v3/videos"
+    params = {
+        'id': video_id,
+        'key': YOUTUBE_API_KEY,
+        'part': 'status,contentDetails'
+    }
+    
+    try:
+        response = requests.get(url, params=params)
+        data = response.json()
+        
+        if response.status_code != 200:
+            error = data.get('error', {}).get('message', 'Unknown error')
+            return False, f"YouTube API error: {error}"
+        
+        # Check if video exists
+        if not data.get('items'):
+            return False, "Video not found or is private"
+        
+        video = data['items'][0]
+        
+        # Check video status
+        status = video.get('status', {})
+        if status.get('privacyStatus') == 'private':
+            return False, "This video is private"
+        if status.get('uploadStatus') != 'processed':
+            return False, "Video is not fully processed"
+        
+        # Check content details
+        content_details = video.get('contentDetails', {})
+        if content_details.get('licensedContent') and not YOUTUBE_API_KEY:
+            return False, "This video requires authentication"
+            
+        return True, None
+        
+    except Exception as e:
+        return False, f"Error checking video availability: {str(e)}"
+
 def get_youtube_options(youtube_id, download_dir):
     """
-    Get YouTube-DL options with authentication if credentials are available.
+    Get YouTube-DL options with API key if available.
     
     Args:
         youtube_id (str): YouTube video ID
@@ -118,16 +170,6 @@ def get_youtube_options(youtube_id, download_dir):
         ],
     }
     
-    # Add authentication if credentials are available
-    if YOUTUBE_USERNAME and YOUTUBE_PASSWORD:
-        ydl_opts.update({
-            'username': YOUTUBE_USERNAME,
-            'password': YOUTUBE_PASSWORD,
-        })
-        logger.info("Using YouTube authentication")
-    else:
-        logger.warning("No YouTube credentials found in .env file. Some videos may be inaccessible.")
-    
     return ydl_opts, pbar
 
 def download_audio(youtube_id, download_dir):
@@ -141,22 +183,18 @@ def download_audio(youtube_id, download_dir):
     Returns:
         tuple: (success (bool), output_file (str), error_message (str))
     """
+    # First check video availability using API
+    is_available, error = check_video_availability(youtube_id)
+    if not is_available:
+        logger.error(f"Video {youtube_id} is not available: {error}")
+        error_logger.error(f"Video {youtube_id} is not available: {error}")
+        return False, None, error
+    
     url = f"https://www.youtube.com/watch?v={youtube_id}"
     ydl_opts, pbar = get_youtube_options(youtube_id, download_dir)
     
     try:
         with YoutubeDL(ydl_opts) as ydl:
-            # Try to extract info first to check if video is accessible
-            try:
-                info = ydl.extract_info(url, download=False)
-                if info.get('age_limit', 0) > 0 and not (YOUTUBE_USERNAME and YOUTUBE_PASSWORD):
-                    raise Exception("This video requires authentication. Please provide YouTube credentials in .env file.")
-            except Exception as e:
-                if "Private video" in str(e) and not (YOUTUBE_USERNAME and YOUTUBE_PASSWORD):
-                    raise Exception("This is a private video. Please provide YouTube credentials in .env file.")
-                raise e
-            
-            # Download the video
             ydl.download([url])
             if pbar:
                 pbar.close()
