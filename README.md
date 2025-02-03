@@ -24,33 +24,38 @@ A robust Python-based pipeline for processing large audio files, including split
 brew install ffmpeg
 
 # For Ubuntu/Debian
-sudo apt-get update
-sudo apt-get install ffmpeg
+sudo apt update
+sudo apt install ffmpeg
 ```
 
 ## Installation
 
 1. Clone the repository:
-```bash
-git clone git@github.com:cerdastangkas/audio_result_transcriber.git
-cd audio_result_transcriber
-```
+
+    ```bash
+    git clone git@github.com:cerdastangkas/audio_result_transcriber.git
+    cd audio_result_transcriber
+    ```
 
 2. Create and activate a virtual environment:
-```bash
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-```
+
+    ```bash
+    python -m venv venv
+    source venv/bin/activate  # On Windows: venv\Scripts\activate
+    ```
 
 3. Install Python dependencies:
-```bash
-pip install -r requirements.txt
-```
+
+    ```bash
+    pip install -r requirements.txt
+    ```
 
 4. Set up environment variables:
-```bash
-cp env.example .env
-```
+
+    ```bash
+    cp env.example .env
+    ```
+
 Edit `.env` and add your DeepInfra API key.
 
 ## Project Structure
@@ -67,13 +72,16 @@ Edit `.env` and add your DeepInfra API key.
 1. Place your audio files in the `source` directory.
 
 2. Run the main processing script:
-```bash
-python main_process.py [filename]
-```
-Example:
-```bash
-python main_process.py my_audio_file.ogg
-```
+
+    ```bash
+    python main_process.py [filename]
+    ```
+
+    Example:
+
+    ```bash
+    python main_process.py my_audio_file.ogg
+    ```
 
 3. The script will:
    - Split the audio file based on silence detection
@@ -96,6 +104,7 @@ result/
 ### CSV Format
 
 The generated CSV file contains:
+
 - `audio_file`: Path to the audio segment
 - `start_time_seconds`: Start time of the segment
 - `end_time_seconds`: End time of the segment
@@ -120,6 +129,7 @@ You can adjust various parameters in the scripts:
 ## Performance Optimization
 
 The pipeline is optimized for performance:
+
 - Parallel processing for file operations
 - Direct FFmpeg usage for audio processing
 - Efficient memory usage with streaming operations
