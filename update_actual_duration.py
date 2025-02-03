@@ -7,6 +7,7 @@ def update_actual_duration():
     excel_path = "data/youtube_videos_submitted.xlsx"
     df = pd.read_excel(excel_path)
     
+    success_count = 0
     # Iterate through each row
     for index, row in df.iterrows():
         video_id = row['id']  # Assuming 'id' is the column name
@@ -22,14 +23,14 @@ def update_actual_duration():
                 
                 # Update the Excel file
                 df.at[index, 'actual_duration_seconds'] = total_duration
-            except Exception as e:
-                print(f"Error processing {video_id}: {str(e)}")
-        else:
-            print(f"Transcript file not found for {video_id}")
+                success_count += 1
+                print(f"Successfully updated duration for {video_id}")
+            except Exception:
+                pass
     
     # Save the updated Excel file
     df.to_excel(excel_path, index=False)
-    print("Excel file has been updated with actual durations")
+    print(f"\nCompleted: Successfully updated {success_count} videos in the Excel file")
 
 if __name__ == "__main__":
     update_actual_duration()
