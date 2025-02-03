@@ -6,6 +6,7 @@ from tqdm import tqdm
 import logging
 import multiprocessing
 import time
+from utils.logger_setup import setup_error_logger
 
 # Load environment variables
 load_dotenv()
@@ -16,9 +17,12 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+error_logger = setup_error_logger('youtube_download')
 
-# Get base data folder from environment
+# Get environment variables
 BASE_DATA_FOLDER = os.getenv('BASE_DATA_FOLDER')
+YOUTUBE_USERNAME = os.getenv('YOUTUBE_USERNAME')
+YOUTUBE_PASSWORD = os.getenv('YOUTUBE_PASSWORD')
 
 def setup_download_directory():
     """Create download directory if it doesn't exist."""
@@ -32,18 +36,17 @@ def format_time(seconds):
     seconds = int(seconds % 60)
     return f"{minutes:02d}:{seconds:02d}"
 
-def download_audio(youtube_id, download_dir):
+def get_youtube_options(youtube_id, download_dir):
     """
-    Download audio from YouTube video.
+    Get YouTube-DL options with authentication if credentials are available.
     
     Args:
         youtube_id (str): YouTube video ID
         download_dir (str): Directory to save the downloaded audio
-    
+        
     Returns:
-        tuple: (success (bool), output_file (str), error_message (str))
+        dict: YouTube-DL options
     """
-    url = f"https://www.youtube.com/watch?v={youtube_id}"
     output_template = os.path.join(download_dir, f"{youtube_id}.%(ext)s")
     
     # Create progress bar
@@ -91,7 +94,7 @@ def download_audio(youtube_id, download_dir):
         elif d['status'] == 'finished':
             if pbar:
                 pbar.set_description(f"Converting {youtube_id} to OGG")
-    
+                
     ydl_opts = {
         # Try to get opus/ogg format directly, fallback to any audio
         'format': 'bestaudio[ext=opus]/bestaudio[ext=ogg]/bestaudio',
@@ -115,8 +118,45 @@ def download_audio(youtube_id, download_dir):
         ],
     }
     
+    # Add authentication if credentials are available
+    if YOUTUBE_USERNAME and YOUTUBE_PASSWORD:
+        ydl_opts.update({
+            'username': YOUTUBE_USERNAME,
+            'password': YOUTUBE_PASSWORD,
+        })
+        logger.info("Using YouTube authentication")
+    else:
+        logger.warning("No YouTube credentials found in .env file. Some videos may be inaccessible.")
+    
+    return ydl_opts, pbar
+
+def download_audio(youtube_id, download_dir):
+    """
+    Download audio from YouTube video.
+    
+    Args:
+        youtube_id (str): YouTube video ID
+        download_dir (str): Directory to save the downloaded audio
+    
+    Returns:
+        tuple: (success (bool), output_file (str), error_message (str))
+    """
+    url = f"https://www.youtube.com/watch?v={youtube_id}"
+    ydl_opts, pbar = get_youtube_options(youtube_id, download_dir)
+    
     try:
         with YoutubeDL(ydl_opts) as ydl:
+            # Try to extract info first to check if video is accessible
+            try:
+                info = ydl.extract_info(url, download=False)
+                if info.get('age_limit', 0) > 0 and not (YOUTUBE_USERNAME and YOUTUBE_PASSWORD):
+                    raise Exception("This video requires authentication. Please provide YouTube credentials in .env file.")
+            except Exception as e:
+                if "Private video" in str(e) and not (YOUTUBE_USERNAME and YOUTUBE_PASSWORD):
+                    raise Exception("This is a private video. Please provide YouTube credentials in .env file.")
+                raise e
+            
+            # Download the video
             ydl.download([url])
             if pbar:
                 pbar.close()
@@ -126,6 +166,7 @@ def download_audio(youtube_id, download_dir):
             pbar.close()
         error_msg = str(e)
         logger.error(f"Error downloading {youtube_id}: {error_msg}")
+        error_logger.error(f"Error downloading {youtube_id}: {error_msg}")
         return False, None, error_msg
 
 def process_excel_file(excel_path):
@@ -156,8 +197,7 @@ def process_excel_file(excel_path):
         logger.info(f"Found {len(pending_videos)} pending videos to process")
         
         # Create download directory if it doesn't exist
-        download_dir = os.path.join(BASE_DATA_FOLDER, 'download')
-        os.makedirs(download_dir, exist_ok=True)
+        download_dir = setup_download_directory()
         
         # Process each video
         success_count = 0
