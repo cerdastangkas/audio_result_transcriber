@@ -91,7 +91,7 @@ Edit `.env` and add your DeepInfra API key.
 
 ### Output Structure
 
-```
+```text
 result/
 └── [filename]/
     ├── split/
