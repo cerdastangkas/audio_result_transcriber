@@ -56,7 +56,7 @@ sudo apt install ffmpeg
     cp env.example .env
     ```
 
-Edit `.env` and add your DeepInfra API key.
+    Edit `.env` and add your DeepInfra API key.
 
 ## Project Structure
 
