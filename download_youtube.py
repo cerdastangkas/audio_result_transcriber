@@ -193,16 +193,16 @@ def get_youtube_options(youtube_id, download_dir):
         ],
     }
     
-    # Look for cookies file in parent directory
+    # Use cookies file from parent directory
     current_dir = os.path.dirname(os.path.abspath(__file__))
     parent_dir = os.path.dirname(current_dir)
-    cookies_file = os.path.join(parent_dir, 'youtube.cookies')
+    cookies_file = os.path.join(current_dir, 'youtube.cookies')
     
     if os.path.exists(cookies_file):
         ydl_opts['cookiefile'] = cookies_file
         logger.info(f"Using cookies file for authentication: {cookies_file}")
     else:
-        logger.warning(f"No cookies file found at {cookies_file}. Some videos may be inaccessible.")
+        raise FileNotFoundError(f"Required cookies file not found at {cookies_file}. Please ensure youtube.cookies file exists.")
     
     return ydl_opts, pbar
 
