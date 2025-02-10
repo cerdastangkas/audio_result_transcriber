@@ -172,8 +172,15 @@ def get_youtube_options(youtube_id, download_dir):
             if pbar:
                 pbar.set_description(f"Converting {youtube_id} to OGG")
                 
+    # Check for cookies file in the same directory as the script
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    cookies_file = os.path.join(current_dir, 'youtube.cookies')
+    
+    if not os.path.exists(cookies_file):
+        raise FileNotFoundError(f"Required cookies file not found at {cookies_file}. Please ensure youtube.cookies file exists.")
+        
     ydl_opts = {
-        'format': 'bestaudio/best[height<=480]/best',  # More flexible format selection
+        'format': 'bestaudio[ext=opus]/bestaudio[ext=m4a]/bestaudio',  # Try opus first, then m4a, then any audio
         'postprocessors': [{
             'key': 'FFmpegExtractAudio',
             'preferredcodec': 'vorbis',
@@ -191,25 +198,8 @@ def get_youtube_options(youtube_id, download_dir):
             '-q:a', '3',
             '-ar', '44100',
         ],
-        # Enhanced options to bypass restrictions
-        'extractor_args': {'youtube': {
-            'player_client': ['android', 'web'],
-            'player_skip': ['webpage', 'configs', 'js'],
-        }},
-        'http_headers': {
-            'User-Agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-            'Accept-Language': 'en-us,en;q=0.5',
-            'Sec-Fetch-Mode': 'navigate',
-        },
-        'age_limit': 99,
-        'geo_bypass': True,
-        'sleep_interval': 3,  # Increased delay
-        'max_sleep_interval': 6,
-        'ignoreerrors': True,
-        'no_check_certificate': True,
-        'prefer_insecure': True,  # Try alternative connections if normal fails
-        'rm_cachedir': True,  # Clear cache to avoid stale data
+        'cookiefile': cookies_file,  # Use cookies file for authentication
+        'ignoreerrors': False  # Don't ignore errors to ensure we know if authentication fails
     }
     
     return ydl_opts, pbar
