@@ -191,18 +191,17 @@ def get_youtube_options(youtube_id, download_dir):
             '-q:a', '3',
             '-ar', '44100',
         ],
+        # Add options to bypass restrictions
+        'extractor_args': {'youtube': {
+            'player_client': ['android'],
+            'player_skip': ['webpage', 'configs', 'js'],
+        }},
+        'age_limit': 99,  # Handle age-restricted videos
+        'geo_bypass': True,  # Try to bypass geo-restrictions
+        'sleep_interval': 2,  # Add delay between requests to avoid rate limiting
+        'max_sleep_interval': 5,
+        'ignoreerrors': True,  # Continue on download errors
     }
-    
-    # Use cookies file from parent directory
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    parent_dir = os.path.dirname(current_dir)
-    cookies_file = os.path.join(current_dir, 'youtube.cookies')
-    
-    if os.path.exists(cookies_file):
-        ydl_opts['cookiefile'] = cookies_file
-        logger.info(f"Using cookies file for authentication: {cookies_file}")
-    else:
-        raise FileNotFoundError(f"Required cookies file not found at {cookies_file}. Please ensure youtube.cookies file exists.")
     
     return ydl_opts, pbar
 
