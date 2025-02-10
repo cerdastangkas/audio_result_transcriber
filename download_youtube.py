@@ -173,7 +173,7 @@ def get_youtube_options(youtube_id, download_dir):
                 pbar.set_description(f"Converting {youtube_id} to OGG")
                 
     ydl_opts = {
-        'format': 'bestaudio[ext=opus]/bestaudio[ext=ogg]/bestaudio',
+        'format': 'bestaudio/best[height<=480]/best',  # More flexible format selection
         'postprocessors': [{
             'key': 'FFmpegExtractAudio',
             'preferredcodec': 'vorbis',
@@ -191,16 +191,25 @@ def get_youtube_options(youtube_id, download_dir):
             '-q:a', '3',
             '-ar', '44100',
         ],
-        # Add options to bypass restrictions
+        # Enhanced options to bypass restrictions
         'extractor_args': {'youtube': {
-            'player_client': ['android'],
+            'player_client': ['android', 'web'],
             'player_skip': ['webpage', 'configs', 'js'],
         }},
-        'age_limit': 99,  # Handle age-restricted videos
-        'geo_bypass': True,  # Try to bypass geo-restrictions
-        'sleep_interval': 2,  # Add delay between requests to avoid rate limiting
-        'max_sleep_interval': 5,
-        'ignoreerrors': True,  # Continue on download errors
+        'http_headers': {
+            'User-Agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'en-us,en;q=0.5',
+            'Sec-Fetch-Mode': 'navigate',
+        },
+        'age_limit': 99,
+        'geo_bypass': True,
+        'sleep_interval': 3,  # Increased delay
+        'max_sleep_interval': 6,
+        'ignoreerrors': True,
+        'no_check_certificate': True,
+        'prefer_insecure': True,  # Try alternative connections if normal fails
+        'rm_cachedir': True,  # Clear cache to avoid stale data
     }
     
     return ydl_opts, pbar
