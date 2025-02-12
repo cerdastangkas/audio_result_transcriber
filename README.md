@@ -1,15 +1,18 @@
 # Audio Processing and Transcription Pipeline
 
-A robust Python-based pipeline for processing large audio files, including splitting based on silence detection, format conversion, and transcription using the DeepInfra Whisper API.
+A robust Python-based pipeline for processing large audio files, including splitting based on silence detection, transcription using the DeepInfra Whisper API, and format conversion to WAV. The pipeline is optimized for performance with parallel processing and efficient memory usage.
 
 ## Features
 
 - **Audio Splitting**: Intelligent silence-based audio splitting using FFmpeg
-- **Parallel Processing**: Optimized performance with multi-threaded operations
-- **Format Conversion**: Automatic conversion from OGG to WAV format
-- **Transcription**: Audio transcription using DeepInfra's Whisper API
-- **Progress Tracking**: Real-time progress bars for long-running operations
-- **Error Handling**: Robust error handling and reporting
+- **Parallel Processing**: Multi-threaded operations for both splitting and transcription
+- **Transcription**: Audio transcription using DeepInfra's Whisper API or OpenAI Whisper API
+- **Format Handling**: 
+  - Processes OGG files for transcription
+  - Converts to WAV format after transcription
+  - Automatic cleanup of temporary files
+- **Progress Tracking**: Real-time progress bars for all operations
+- **Error Handling**: Comprehensive error logging and recovery
 
 ## Prerequisites
 
@@ -55,75 +58,154 @@ Edit `.env` and add your DeepInfra API key.
 
 ## Project Structure
 
-- `main_process.py`: Main entry point for the audio processing pipeline
-- `audio_splitter.py`: Handles audio file splitting using silence detection
-- `convert_and_clean.py`: Converts audio formats and cleans up temporary files
-- `transcribe_chunks.py`: Manages audio transcription using DeepInfra API
-- `requirements.txt`: Python package dependencies
-- `.env`: Configuration for API keys and settings
-
-## Usage
-
-1. Place your audio files in the `source` directory.
-
-2. Run the main processing script:
-```bash
-python main_process.py [filename]
 ```
-Example:
-```bash
-python main_process.py my_audio_file.ogg
+src/
+├── core/
+│   ├── audio_splitter.py     # Audio splitting with silence detection
+│   ├── convert_and_clean.py  # Audio format conversion and cleanup
+│   └── transcribe_chunks.py  # Audio transcription handling
+├── utils/
+│   ├── compress_results.py   # Results compression utilities
+│   ├── download_youtube.py   # YouTube download functionality
+│   ├── logger_setup.py       # Logging configuration
+│   └── constants.py          # Shared constants and settings
+├── main_process.py          # Main pipeline orchestration
+└── requirements.txt         # Python dependencies
+
+data/
+├── source/                  # Input audio files
+├── result/                  # Processed results
+└── silence_points/          # Silence detection data
 ```
 
-3. The script will:
-   - Split the audio file based on silence detection
-   - Convert the chunks to WAV format
-   - Transcribe each chunk using DeepInfra's Whisper API
-   - Generate a CSV file with transcriptions
+## Command-Line Operations
+
+### 1. Process Audio Files
+Split audio files into chunks and transcribe them using OpenAI Whisper API:
+```bash
+python src/main_process.py data/download --archive-dir data/archive --use-openai
+```
+Options:
+- `--archive-dir`: Directory to move processed files to
+- `--use-openai`: Use OpenAI's Whisper API instead of DeepInfra
+
+### 2. Download YouTube Videos
+Download videos from a list in Excel:
+```bash
+python src/utils/download_youtube.py data/youtube_videos_submitted.xlsx
+```
+The Excel file should contain video IDs and other metadata for processing.
+
+### 3. Update Duration Data
+Update the actual duration information for processed files:
+```bash
+python src/utils/update_actual_duration.py
+```
+
+### 4. Update Processing Status
+Update the processing status in the Excel tracking file:
+```bash
+python src/utils/update_processing_status.py data/youtube_videos_submitted.xlsx
+```
+
+### 5. Compress Results
+Compress processed folders to save space:
+```bash
+python src/utils/compress_results.py
+```
+
+### Processing Flow
+1. Download videos using the Excel list
+2. Process the audio files with OpenAI transcription
+3. Update duration data in tracking files
+4. Update processing status in Excel
+5. Compress results for storage
 
 ### Output Structure
 
 ```
-result/
-└── [filename]/
-    ├── split/
-    │   ├── [filename]_segment_000.wav
-    │   ├── [filename]_segment_001.wav
-    │   └── ...
-    └── [filename]_transcripts.csv
+data/
+├── result/
+│   └── [video_id]/
+│       ├── split/
+│       │   ├── [video_id]_segment_000.wav
+│       │   ├── [video_id]_segment_001.wav
+│       │   └── ...
+│       └── [video_id]_transcripts.csv
+└── silence_points/
+    └── [video_id]_silence_points.json
 ```
 
-### CSV Format
+### Output Files
 
-The generated CSV file contains:
-- `audio_file`: Path to the audio segment
-- `start_time_seconds`: Start time of the segment
-- `end_time_seconds`: End time of the segment
+1. **Transcription CSV** (`[video_id]_transcripts.csv`):
+   - `audio_file`: Path to the audio segment
+   - `start_time_seconds`: Start time in original audio
+   - `end_time_seconds`: End time in original audio
+   - `duration_seconds`: Segment duration
+   - `text`: Transcribed text
+
+2. **Silence Points** (`[video_id]_silence_points.json`):
+   - Detailed information about detected silence points
+   - Segment timing and duration data
+   - Processing parameters used
 - `duration_seconds`: Duration of the segment
 - `text`: Transcribed text
 
 ## Configuration
 
-You can adjust various parameters in the scripts:
+### Environment Variables (.env)
+```bash
+BASE_DATA_FOLDER=data           # Base directory for all data
+DEEPINFRA_API_KEY=your_key     # DeepInfra API key
+OPENAI_API_KEY=your_key        # Optional: OpenAI API key
+```
 
-- `min_silence_len`: Minimum length of silence (in ms)
-- `silence_thresh`: Silence threshold in dB
-- `min_duration`: Minimum segment duration
-- `max_duration`: Maximum segment duration
+### Adjustable Parameters
+
+1. **Audio Splitting** (audio_splitter.py):
+   - `min_silence_len`: Minimum silence length (default: 700ms)
+   - `silence_thresh`: Silence threshold (default: -35dB)
+   - `min_duration`: Minimum segment length (default: 2s)
+   - `max_duration`: Maximum segment length (default: 15s)
+
+2. **Transcription** (transcribe_chunks.py):
+   - `model`: Whisper model to use (default: 'openai/whisper-large')
+   - `use_openai`: Whether to use OpenAI API (default: False)
+
+## Process Flow
+
+1. **Audio Splitting**:
+   - Detect silence points using FFmpeg
+   - Split audio into optimal chunks (2-15 seconds)
+   - Save timing information in silence_points.json
+
+2. **Transcription**:
+   - Process OGG chunks in parallel
+   - Use DeepInfra or OpenAI Whisper API
+   - Save transcriptions with timing data
+
+3. **Format Conversion**:
+   - Convert OGG chunks to WAV format
+   - Remove original OGG files
+   - Clean up temporary directories
 
 ## Error Handling
 
-- Failed operations are logged and reported
-- Original files are preserved until successful conversion
-- Detailed error messages for debugging
+- Comprehensive logging with error details
+- Automatic retry for API failures
+- Progress preservation on interruption
+- Failed files tracking for review
 
-## Performance Optimization
+## Performance Features
 
-The pipeline is optimized for performance:
-- Parallel processing for file operations
-- Direct FFmpeg usage for audio processing
-- Efficient memory usage with streaming operations
-- Progress tracking for long-running tasks
+- Multi-threaded processing for:
+  - Audio splitting
+  - Transcription
+  - Format conversion
+- Progress bars for all operations
+- Memory-efficient streaming operations
+- Parallel API requests with rate limiting
 
 ## Contributing
 

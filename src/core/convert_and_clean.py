@@ -11,7 +11,7 @@ load_dotenv()
 BASE_DATA_FOLDER = os.getenv('BASE_DATA_FOLDER')
 
 def convert_audio_file(args):
-    """Convert a single audio file to WAV using FFmpeg."""
+    """Convert a single audio file to WAV using FFmpeg and remove the original OGG."""
     input_file, output_file = args
     try:
         cmd = [
@@ -27,33 +27,31 @@ def convert_audio_file(args):
         result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         if result.returncode == 0:
             try:
-                os.remove(input_file)  # Delete original file
-                return True, input_file, output_file
+                os.remove(input_file)  # Remove original OGG file
+                return True, output_file
             except Exception as e:
-                return False, input_file, f"Error deleting original file: {str(e)}"
+                return False, f"Error removing original file: {str(e)}"
         else:
-            return False, input_file, f"FFmpeg error: {result.stderr.decode()}"
+            return False, f"FFmpeg error: {result.stderr.decode()}"
     except Exception as e:
-        return False, input_file, str(e)
+        return False, str(e)
 
 def convert_chunks_to_wav(base_filename):
-    """Convert all audio chunks to WAV format in parallel."""
+    """Convert all audio chunks to WAV format in parallel and remove original OGG files."""
     input_dir = os.path.join(BASE_DATA_FOLDER, 'result', base_filename, 'split')
-    csv_file_path = os.path.join(BASE_DATA_FOLDER, 'result', base_filename, f'{base_filename}_transcripts.csv')
     
-    # Read existing CSV data
-    with open(csv_file_path, mode='r', newline='') as csv_file:
-        csv_reader = csv.DictReader(csv_file)
-        fieldnames = csv_reader.fieldnames
-        rows = list(csv_reader)
+    # Get list of audio files
+    audio_files = [f for f in os.listdir(input_dir) if f.endswith('.ogg') and 'segment' in f]
+    if not audio_files:
+        print(f"No audio segments found in {input_dir}")
+        return
     
     # Prepare conversion arguments
     conversion_args = []
-    for row in rows:
-        if row['audio_file'].endswith('.ogg'):
-            input_file = os.path.join(BASE_DATA_FOLDER, 'result', base_filename, row['audio_file'])
-            output_file = input_file.replace('.ogg', '.wav')
-            conversion_args.append((input_file, output_file))
+    for audio_file in audio_files:
+        input_file = os.path.join(input_dir, audio_file)
+        output_file = os.path.join(input_dir, audio_file.replace('.ogg', '.wav'))
+        conversion_args.append((input_file, output_file))
     
     if not conversion_args:
         print("No files to convert")
@@ -70,32 +68,31 @@ def convert_chunks_to_wav(base_filename):
         
         with tqdm(total=len(conversion_args), desc="Converting") as pbar:
             for future in as_completed(futures):
-                success, input_file, result = future.result()
+                success, result = future.result()
                 if success:
-                    successful_conversions.append((input_file, result))
+                    successful_conversions.append(result)
                 else:
-                    failed_conversions.append((input_file, result))
+                    failed_conversions.append(result)
                 pbar.update(1)
     
-    # Update CSV rows
-    for row in rows:
-        if row['audio_file'].endswith('.ogg'):
-            row['audio_file'] = row['audio_file'].replace('.ogg', '.wav')
-    
-    # Write updated CSV data
-    with open(csv_file_path, mode='w', newline='') as csv_file:
-        csv_writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
-        csv_writer.writeheader()
-        csv_writer.writerows(rows)
-    
-    # Report results
-    print(f"\nSuccessfully converted {len(successful_conversions)} files")
+    # Print summary of conversion results
+    print(f"\nSuccessfully converted {len(successful_conversions)} files to WAV and removed original OGG files")
     if failed_conversions:
         print(f"Failed to convert {len(failed_conversions)} files:")
-        for input_file, error in failed_conversions:
-            print(f"- {os.path.basename(input_file)}: {error}")
+        for error in failed_conversions:
+            print(f"- {error}")
     
-    print(f"CSV file updated with new filenames in {csv_file_path}")
+    # Clean up temp folder if it exists
+    temp_dir = os.path.join(input_dir, 'temp')
+    if os.path.exists(temp_dir):
+        try:
+            import shutil
+            shutil.rmtree(temp_dir)
+            print(f"Cleaned up temp directory: {temp_dir}")
+        except Exception as e:
+            print(f"Warning: Could not remove temp directory: {e}")
+    
+    return successful_conversions
 
 if __name__ == '__main__':
     import argparse
