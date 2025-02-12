@@ -4,11 +4,11 @@ import time
 import subprocess
 import logging
 from datetime import datetime
-from audio_splitter import split_audio_at_silence
-from transcribe_chunks import transcribe_chunks
-from convert_and_clean import convert_chunks_to_wav
-from pydub import AudioSegment
+from core.audio_splitter import split_audio_at_silence
+from core.transcribe_chunks import transcribe_chunks
+from core.convert_and_clean import convert_chunks_to_wav
 from utils.logger_setup import setup_error_logger
+from utils.constants import BASE_DATA_FOLDER
 
 # Setup logging
 logging.basicConfig(
@@ -97,7 +97,22 @@ def get_audio_duration(file_path):
     except subprocess.CalledProcessError as e:
         raise RuntimeError(f"Error getting duration: {e.stderr}")
 
-def process_audio_file(file_path, stats):
+def cleanup_temp_files(base_filename):
+    """Clean up all temporary files and directories after processing."""
+    result_dir = os.path.join(BASE_DATA_FOLDER, 'result', base_filename)
+    
+    # Find and clean up all temp directories
+    for root, dirs, files in os.walk(result_dir):
+        if 'temp' in dirs:
+            temp_dir = os.path.join(root, 'temp')
+            try:
+                import shutil
+                shutil.rmtree(temp_dir)
+                logger.info(f"Cleaned up temp directory: {temp_dir}")
+            except Exception as e:
+                logger.warning(f"Could not remove temp directory {temp_dir}: {e}")
+
+def process_audio_file(file_path, stats, use_openai=False):
     """Process a single audio file and update statistics."""
     base_filename = os.path.splitext(os.path.basename(file_path))[0]
     logger.info(f"\nProcessing {base_filename}...")
@@ -111,12 +126,12 @@ def process_audio_file(file_path, stats):
         logger.info("Splitting audio into chunks...")
         split_audio_at_silence(file_path, base_filename)
         
-        # Transcribe chunks
+        # Transcribe chunks (using OGG files)
         logger.info("Transcribing audio chunks...")
-        transcribe_chunks(base_filename)
+        transcribe_chunks(base_filename, use_openai=use_openai)
         
-        # Convert chunks to wav format
-        logger.info("Converting chunks to wav format...")
+        # Convert OGG to WAV and remove OGG files
+        logger.info("Converting chunks to WAV format...")
         convert_chunks_to_wav(base_filename)
         
         stats.mark_success()
@@ -125,7 +140,7 @@ def process_audio_file(file_path, stats):
     except Exception as e:
         stats.mark_failure(file_path, e)
 
-def process_directory(source_dir, archive_dir=None):
+def process_directory(source_dir, archive_dir=None, use_openai=False):
     """Process all audio files in the source directory and track statistics."""
     stats = ProcessingStats()
     stats.start()
@@ -141,7 +156,7 @@ def process_directory(source_dir, archive_dir=None):
             file_path = os.path.join(source_dir, filename)
             
             # Process the file
-            process_audio_file(file_path, stats)
+            process_audio_file(file_path, stats, use_openai)
             
             # Move to archive only if processing was successful and archive_dir is specified
             if archive_dir and file_path not in [f[0] for f in stats.failed_files]:
@@ -155,9 +170,10 @@ def process_directory(source_dir, archive_dir=None):
 @click.command()
 @click.argument('source_dir', type=click.Path(exists=True))
 @click.option('--archive-dir', type=click.Path(), help='Optional directory to move processed files to')
-def main(source_dir, archive_dir):
+@click.option('--use-openai', is_flag=True, help='Use OpenAI Whisper API instead of DeepInfra')
+def main(source_dir, archive_dir, use_openai):
     """Process all audio files in the source directory and generate statistics."""
-    process_directory(source_dir, archive_dir)
+    process_directory(source_dir, archive_dir, use_openai)
 
 if __name__ == '__main__':
     main()
