@@ -48,21 +48,56 @@ def transcribe_audio_with_session(args):
             response = session.post(url, files=files)
             
             if response.status_code == 200:
-                return True, file_path, response.json().get('text', '')
+                text = response.json().get('text', '')
+                duration_seconds = response.json().get('duration', None)
+                
+                # Check if text has meaningful content
+                if not has_meaningful_content(text, duration_seconds):
+                    return False, file_path, "Empty or meaningless text", 0.0
+                    
+                return True, file_path, text, duration_seconds
             elif response.status_code == 429:  # Rate limit
                 time.sleep(5)  # Wait 5 seconds before retry
-                return False, file_path, "Rate limit exceeded"
+                return False, file_path, "Rate limit exceeded", 0.0
             else:
-                return False, file_path, f"Error {response.status_code}: {response.text}"
+                return False, file_path, f"Error {response.status_code}: {response.text}", 0.0
     except Exception as e:
         return False, file_path, str(e)
 
-def has_meaningful_content(text):
-    """Check if text contains actual words, not just punctuation or spaces."""
+def has_meaningful_content(text, duration_seconds=None):
+    """Check if text contains actual words, not just punctuation or spaces.
+    Also filters out segments that have less than 2 words AND duration > 2 seconds.
+    
+    Args:
+        text (str): The text to check
+        duration_seconds (float, optional): Duration of the audio segment in seconds
+    
+    Returns:
+        bool: True if text has meaningful content, False otherwise
+    """
     # Remove common punctuation and whitespace
     import re
     cleaned_text = re.sub(r'[.,!?;:\-\s]+', '', text.strip())
-    return len(cleaned_text) > 0
+    
+    # Basic check for non-empty content
+    if len(cleaned_text) == 0:
+        return False
+        
+    # Count words (split by whitespace after stripping punctuation)
+    words = [w for w in re.sub(r'[.,!?;:\-]+', '', text.strip()).split() if w]
+    word_count = len(words)
+    print(f"    Word count: {word_count}")
+    print(f"    Duration: {duration_seconds}")
+    
+    # Check if text has actual words
+    if word_count == 0:
+        return False
+    
+    # If duration is provided, check for segments with few words but long duration
+    if duration_seconds and duration_seconds > 2 and word_count <= 2:
+        return False
+        
+    return True
 
 def has_no_special_characters(text):
     """Check if text doesn't contain special characters like CJK or Cyrillic."""
@@ -182,18 +217,19 @@ def transcribe_audio_with_openai(args):
                 
                 text = response_data.get('text', '')
                 detected_language = response_data.get('language')
+                duration_seconds = response_data.get('duration', None)
                 
                 # First check if text has meaningful content
-                if not has_meaningful_content(text):
+                if not has_meaningful_content(text, duration_seconds):
                     print(f"    Empty or meaningless text detected: {text}")
                     cleanup_invalid_transcription(file_path, "Empty or meaningless text")
-                    return False, file_path, ''
+                    return False, file_path, '', 0.0
                 
                 # Handle case where language detection failed
                 if not detected_language:
                     print(f"    Language detection failed")
                     cleanup_invalid_transcription(file_path, "Language detection failed")
-                    return False, file_path, ''
+                    return False, file_path, '', 0.0
                 
                 detected_language = detected_language.lower()
                 
@@ -202,25 +238,25 @@ def transcribe_audio_with_openai(args):
                     # Finally check for special characters
                     if has_no_special_characters(text):
                         print(f"    Valid Indonesian text detected: {text[:50]}...")
-                        return True, file_path, text
+                        return True, file_path, text, duration_seconds
                     else:
                         print(f"    Text contains special characters: {text[:50]}...")
                         cleanup_invalid_transcription(file_path, "Contains special characters")
-                        return False, file_path, ''
+                        return False, file_path, '', 0.0
                 else:
                     print(f"    Non-Indonesian segment detected (language: {detected_language}): {text[:50]}...")
                     cleanup_invalid_transcription(file_path, f"Non-Indonesian language: {detected_language}")
-                    return False, file_path, ''
+                    return False, file_path, '', 0.0
                     
             elif response.status_code == 429:  # Rate limit
                 time.sleep(20)  # Wait longer for OpenAI rate limits
-                return False, file_path, "Rate limit exceeded"
+                return False, file_path, "Rate limit exceeded", 0.0
             else:
-                return False, file_path, f"Error {response.status_code}: {response.text}"
+                return False, file_path, f"Error {response.status_code}: {response.text}", 0.0
     except Exception as e:
-        return False, file_path, str(e)
+        return False, file_path, str(e), 0.0
 
-def transcribe_chunks(base_filename, model='openai/whisper-large', use_openai=False):
+def transcribe_chunks(base_filename, model='openai/whisper-large-v3', use_openai=False):
     """Transcribe all audio chunks in parallel and save to CSV."""
     if not base_filename:
         print("Error: No base filename provided")
@@ -336,6 +372,7 @@ def transcribe_chunks(base_filename, model='openai/whisper-large', use_openai=Fa
     # Process transcriptions in parallel
     max_workers = min(multiprocessing.cpu_count() * 2, len(rows))  # Use 2x CPU cores
     successful_transcriptions = {}
+    successful_durations = {}
     failed_transcriptions = []
     
     print(f"\nTranscribing {len(rows)} audio segments...")
@@ -353,9 +390,10 @@ def transcribe_chunks(base_filename, model='openai/whisper-large', use_openai=Fa
         
         with tqdm(total=len(rows), desc="Transcribing") as pbar:
             for future in as_completed(futures):
-                success, file_path, result = future.result()
+                success, file_path, result, duration_seconds = future.result()
                 if success:
                     successful_transcriptions[file_path] = result
+                    successful_durations[file_path] = duration_seconds
                 else:
                     failed_transcriptions.append((file_path, result))
                 pbar.update(1)
@@ -369,8 +407,9 @@ def transcribe_chunks(base_filename, model='openai/whisper-large', use_openai=Fa
         audio_file_path = os.path.join(BASE_DATA_FOLDER, 'result', base_filename, row['audio_file'])
         if audio_file_path in successful_transcriptions:
             row['text'] = successful_transcriptions[audio_file_path]
+            row['duration_seconds'] = successful_durations[audio_file_path]
             valid_rows.append(row)
-    
+
     # Replace rows with only valid ones
     rows = valid_rows
     

@@ -170,8 +170,8 @@ OPENAI_API_KEY=your_key        # Optional: OpenAI API key
    - `max_duration`: Maximum segment length (default: 15s)
 
 2. **Transcription** (transcribe_chunks.py):
-   - `model`: Whisper model to use (default: 'openai/whisper-large')
-   - `use_openai`: Whether to use OpenAI API (default: False)
+   - `model`: Whisper model to use (default: 'openai/whisper-large-v3')
+   - `use_openai`: Whether to use OpenAI API (default: False)  
 
 ## Process Flow
 
