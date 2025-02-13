@@ -7,7 +7,7 @@ from tqdm import tqdm
 import logging
 import multiprocessing
 import time
-from utils.logger_setup import setup_error_logger
+from logger_setup import setup_error_logger
 import requests
 import re
 import tempfile
