@@ -251,7 +251,7 @@ def transcribe_chunks(base_filename, model='openai/whisper-large', use_openai=Fa
         print(f"Error: Split directory not found: {input_dir}")
         return
         
-    audio_files = [f for f in os.listdir(input_dir) if f.endswith('.ogg') and 'segment' in f]
+    audio_files = [f for f in os.listdir(input_dir) if f.endswith('.wav') and 'segment' in f]
     if not audio_files:
         print(f"Error: No audio segments found in {input_dir}")
         return
@@ -280,7 +280,7 @@ def transcribe_chunks(base_filename, model='openai/whisper-large', use_openai=Fa
                 print(f"Error: Invalid segment data at index {i}")
                 continue
                 
-            audio_file = f'{base_filename}_segment_{i:03d}.ogg'
+            audio_file = f'{base_filename}_segment_{i:03d}.wav'
             # Check if the audio file exists before adding to rows
             audio_file_path = os.path.join(input_dir, audio_file)
             if not os.path.exists(audio_file_path):

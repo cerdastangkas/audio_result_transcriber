@@ -128,14 +128,14 @@ def process_audio_file(file_path, stats, use_openai=False):
         # Split audio into chunks (pass file path directly)
         logger.info("Splitting audio into chunks...")
         split_audio_at_silence(file_path, base_filename)
+
+        # Convert OGG to WAV and remove OGG files
+        logger.info("Converting chunks to WAV format...")
+        convert_chunks_to_wav(base_filename)
         
         # Transcribe chunks (using OGG files)
         logger.info("Transcribing audio chunks...")
         transcribe_chunks(base_filename, use_openai=use_openai)
-        
-        # Convert OGG to WAV and remove OGG files
-        logger.info("Converting chunks to WAV format...")
-        convert_chunks_to_wav(base_filename)
         
         stats.mark_success()
         logger.info(f"Completed processing {base_filename}")

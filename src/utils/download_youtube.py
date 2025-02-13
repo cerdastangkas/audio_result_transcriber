@@ -1,6 +1,7 @@
 import os
 import pandas as pd
 from yt_dlp import YoutubeDL
+from yt_dlp.cookies import extract_cookies_from_browser
 from dotenv import load_dotenv
 from tqdm import tqdm
 import logging
@@ -9,6 +10,7 @@ import time
 from utils.logger_setup import setup_error_logger
 import requests
 import re
+import tempfile
 
 # Load environment variables
 load_dotenv()
@@ -113,9 +115,40 @@ def check_video_availability(video_id):
     except Exception as e:
         return False, f"Error checking video availability: {str(e)}"
 
+def get_browser_cookies():
+    """
+    Try to extract cookies from the browser.
+    Attempts to get cookies from Chrome, Firefox, Safari, etc.
+    
+    Returns:
+        str: Path to temporary cookie file, or None if extraction failed
+    """
+    try:
+        # Create a temporary file to store the cookies
+        temp_cookie_file = tempfile.NamedTemporaryFile(delete=False, suffix='.txt')
+        temp_cookie_file.close()
+        
+        # Try to extract cookies from various browsers
+        browsers = ['chrome', 'firefox', 'safari', 'edge', 'opera']
+        for browser in browsers:
+            try:
+                extract_cookies_from_browser(browser, temp_cookie_file.name)
+                logger.info(f"Successfully extracted cookies from {browser}")
+                return temp_cookie_file.name
+            except Exception as e:
+                logger.debug(f"Could not extract cookies from {browser}: {e}")
+                continue
+        
+        # If no cookies were extracted, clean up and return None
+        os.unlink(temp_cookie_file.name)
+        return None
+    except Exception as e:
+        logger.warning(f"Error extracting browser cookies: {e}")
+        return None
+
 def get_youtube_options(youtube_id, download_dir):
     """
-    Get YouTube-DL options with cookie file from parent directory.
+    Get YouTube-DL options with cookies from browser or cookie file.
     
     Args:
         youtube_id (str): YouTube video ID
@@ -171,13 +204,21 @@ def get_youtube_options(youtube_id, download_dir):
         elif d['status'] == 'finished':
             if pbar:
                 pbar.set_description(f"Converting {youtube_id} to OGG")
-                
-    # Check for cookies file in the same directory as the script
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    cookies_file = os.path.join(current_dir, 'youtube.cookies')
     
-    if not os.path.exists(cookies_file):
-        raise FileNotFoundError(f"Required cookies file not found at {cookies_file}. Please ensure youtube.cookies file exists.")
+    # First try to get cookies from browser
+    cookies_file = get_browser_cookies()
+    
+    # If browser cookies failed, try the youtube.cookies file
+    if cookies_file is None:
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        cookies_file = os.path.join(current_dir, 'youtube.cookies')
+        if not os.path.exists(cookies_file):
+            logger.warning("No cookies available. Some videos may be inaccessible.")
+            cookies_file = None
+        else:
+            logger.info("Using cookies from youtube.cookies file")
+    else:
+        logger.info("Using cookies extracted from browser")
         
     ydl_opts = {
         'format': 'bestaudio[ext=opus]/bestaudio[ext=m4a]/bestaudio',  # Try opus first, then m4a, then any audio
@@ -198,9 +239,12 @@ def get_youtube_options(youtube_id, download_dir):
             '-q:a', '3',
             '-ar', '44100',
         ],
-        'cookiefile': cookies_file,  # Use cookies file for authentication
         'ignoreerrors': False  # Don't ignore errors to ensure we know if authentication fails
     }
+    
+    # Add cookies file to options if available
+    if cookies_file:
+        ydl_opts['cookiefile'] = cookies_file
     
     return ydl_opts, pbar
 

@@ -363,20 +363,8 @@ def split_audio_ffmpeg(input_file, output_dir, base_filename, min_duration=2, ma
                             print(f"      Valid duration, adding combined segment")
                             current_sub_segments.append((combined_start, combined_end))
                             total_duration += combined_duration
-                        elif combined_duration > max_duration:
-                            # If single segment is too long, split it
-                            num_parts = int(np.ceil(combined_duration / max_duration))
-                            part_duration = combined_duration / num_parts
-                            for p in range(num_parts):
-                                part_start = combined_start + (p * part_duration)
-                                part_end = min(combined_start + ((p + 1) * part_duration), combined_end)
-                                part_size = part_end - part_start
-                                if part_size >= min_duration:
-                                    print(f"      Adding split part {p}: {part_start:.2f}s to {part_end:.2f}s (duration: {part_size:.2f}s)")
-                                    current_sub_segments.append((part_start, part_end))
-                                    total_duration += part_size
                         else:
-                            print(f"      Invalid duration (not between {min_duration}s and {max_duration}s)")
+                            print(f"      Invalid duration (not between {min_duration}s and {max_duration}s) - dropping segment")
                         
                         i = end_idx + 1
                     
@@ -511,12 +499,69 @@ def split_audio_ffmpeg(input_file, output_dir, base_filename, min_duration=2, ma
     # Export the segments
     
     print(f"Created {len(segments)} segments")
+    print("Analyzing segments for duration...")
+    
+    # First, save all segments to JSON for analysis
+    silence_info = {
+        'filename': os.path.basename(input_file),
+        'total_duration': total_duration,
+        'processing_timestamp': datetime.now().isoformat(),
+        'parameters': {
+            'min_duration': min_duration,
+            'max_duration': max_duration,
+            'silence_thresh': silence_thresh,
+            'min_silence_len': min_silence_len
+        },
+        'silence_ranges': [
+            {
+                'start': start,
+                'end': end,
+                'duration': end - start
+            } for start, end in silence_ranges
+        ],
+        'segments': [
+            {
+                'start': start,
+                'end': end,
+                'duration': end - start
+            } for start, end in segments
+        ]
+    }
+    
+    # Save to JSON file in centralized silence_points directory
+    silence_points_dir = os.path.join(BASE_DATA_FOLDER, 'silence_points')
+    os.makedirs(silence_points_dir, exist_ok=True)
+    json_output_path = os.path.join(silence_points_dir, f'{base_filename}_silence_points.json')
+    with open(json_output_path, 'w') as f:
+        json.dump(silence_info, f, indent=2)
+    
+    print(f"Saved all segments information to {json_output_path}")
+    
+    # Now filter out segments longer than max_duration
+    valid_segments = []
+    dropped_count = 0
+    total_dropped_duration = 0
+    
+    for start, end in segments:
+        duration = end - start
+        if duration <= max_duration:
+            valid_segments.append((start, end))
+        else:
+            print(f"Dropping segment {start:.2f}s to {end:.2f}s (duration: {duration:.2f}s) - exceeds maximum duration of {max_duration}s")
+            dropped_count += 1
+            total_dropped_duration += duration
+    
+    print(f"\nSegment Analysis:")
+    print(f"- Total segments found: {len(segments)}")
+    print(f"- Segments retained: {len(valid_segments)}")
+    print(f"- Segments dropped: {dropped_count}")
+    print(f"- Total duration dropped: {total_dropped_duration:.2f}s")
     
     # Prepare export arguments
     export_args = []
     segment_info = {}  # Store segment information for CSV
     
-    for i, (start, end) in enumerate(segments):
+    for i, (start, end) in enumerate(valid_segments):
         output_path = os.path.join(output_dir, f'{base_filename}_segment_{i:03d}.ogg')
         export_args.append((input_file, start, end, output_path, min_silence_len))
         segment_info[output_path] = {'start': start, 'end': end}
@@ -526,7 +571,7 @@ def split_audio_ffmpeg(input_file, output_dir, base_filename, min_duration=2, ma
     failed_segments = []
     
     # Ensure we have at least 1 worker, but no more than 2x CPU cores or number of segments
-    max_workers = max(1, min(multiprocessing.cpu_count() * 2, len(segments)))
+    max_workers = max(1, min(multiprocessing.cpu_count() * 2, len(valid_segments)))
     
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = [executor.submit(export_segment, args) for args in export_args]
