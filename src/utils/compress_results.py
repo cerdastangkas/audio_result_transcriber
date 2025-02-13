@@ -6,7 +6,7 @@ from tqdm import tqdm
 import shutil
 import pandas as pd
 from datetime import datetime
-from logger_setup import setup_error_logger
+from utils.logger_setup import setup_error_logger
 
 # Load environment variables
 load_dotenv()

@@ -9,6 +9,9 @@ from core.transcribe_chunks import transcribe_chunks
 from core.convert_and_clean import convert_chunks_to_wav
 from utils.logger_setup import setup_error_logger
 from utils.constants import BASE_DATA_FOLDER
+from utils.update_actual_duration import update_actual_duration
+from utils.update_processing_status import update_processing_status
+from utils.compress_results import compress_result_folders
 
 # Setup logging
 logging.basicConfig(
@@ -174,6 +177,9 @@ def process_directory(source_dir, archive_dir=None, use_openai=False):
 def main(source_dir, archive_dir, use_openai):
     """Process all audio files in the source directory and generate statistics."""
     process_directory(source_dir, archive_dir, use_openai)
+    update_actual_duration()
+    update_processing_status(os.path.join(BASE_DATA_FOLDER, 'youtube_videos_submitted.xlsx'))
+    compress_result_folders()
 
 if __name__ == '__main__':
     main()

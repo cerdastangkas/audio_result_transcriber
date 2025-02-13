@@ -34,6 +34,9 @@ def get_filenames_without_extension(directory):
     for file in os.listdir(directory):
         # Get filename without extension
         filename = os.path.splitext(file)[0]
+        if file.endswith('.zip'):
+            # Extract filename from {filename}_local_processing.zip
+            filename = Path(filename).stem.replace('_local_processing', '')
         filenames.add(filename)
     
     return filenames
@@ -61,12 +64,15 @@ def update_processing_status(excel_path):
         # Get filenames from download and archive folders
         download_dir = os.path.join(BASE_DATA_FOLDER, 'download')
         archive_dir = os.path.join(BASE_DATA_FOLDER, 'archive')
+        result_dir = os.path.join(BASE_DATA_FOLDER, 'result')
         
         downloaded_files = get_filenames_without_extension(download_dir)
         archived_files = get_filenames_without_extension(archive_dir)
+        result_files = get_filenames_without_extension(result_dir)
         
         logger.info(f"Found {len(downloaded_files)} files in download folder")
         logger.info(f"Found {len(archived_files)} files in archive folder")
+        logger.info(f"Found {len(result_files)} files in result folder")
         
         # Update counts
         updated_downloaded = 0
@@ -83,6 +89,9 @@ def update_processing_status(excel_path):
             elif youtube_id in downloaded_files and current_status != 'downloaded':
                 df.at[idx, 'processing_status'] = 'downloaded'
                 updated_downloaded += 1
+            elif youtube_id in result_files and current_status != 'transcribed':
+                df.at[idx, 'processing_status'] = 'transcribed'
+                updated_transcribed += 1
         
         # Save updated Excel file
         df.to_excel(excel_path, index=False)
