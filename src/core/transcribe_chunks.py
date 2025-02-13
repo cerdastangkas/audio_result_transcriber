@@ -84,6 +84,69 @@ def has_no_special_characters(text):
     
     return True
 
+def remove_from_csv(base_filename, audio_file):
+    """Remove an entry from the transcripts CSV file."""
+    result_dir = os.path.join(BASE_DATA_FOLDER, 'result', base_filename)
+    csv_file_path = os.path.join(result_dir, f'{base_filename}_transcripts.csv')
+    
+    if not os.path.exists(csv_file_path):
+        print(f"Error: Transcript file not found: {csv_file_path}")
+        return False
+    
+    # Read existing rows
+    rows = []
+    with open(csv_file_path, 'r', newline='') as csvfile:
+        reader = csv.DictReader(csvfile)
+        rows = list(reader)
+    
+    # Get base name of current audio file without extension
+    current_base = os.path.splitext(os.path.basename(audio_file))[0]
+    
+    # Filter out the matching row
+    new_rows = []
+    for row in rows:
+        row_base = os.path.splitext(os.path.basename(row['audio_file']))[0]
+        if row_base != current_base:
+            new_rows.append(row)
+    
+    # Write updated CSV
+    fieldnames = ['audio_file', 'start_time_seconds', 'end_time_seconds', 'duration_seconds', 'text']
+    with open(csv_file_path, 'w', newline='') as csvfile:
+        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(new_rows)
+    
+    print(f"Removed entry for {current_base} from {csv_file_path}")
+    return True
+
+def cleanup_invalid_transcription(file_path, reason):
+    """Clean up invalid transcription by removing CSV entry and audio file."""
+    try:
+        # Get base filename from path
+        base_filename = os.path.basename(os.path.dirname(os.path.dirname(file_path)))
+        
+        # Remove from CSV
+        remove_from_csv(base_filename, file_path)
+        
+        # Delete audio file if it exists
+        if os.path.exists(file_path):
+            try:
+                os.remove(file_path)
+                print(f"    Deleted audio file: {file_path}")
+            except Exception as e:
+                print(f"    Warning: Could not delete audio file {file_path}: {str(e)}")
+            
+        print(f"    Cleaned up invalid transcription: {reason}")
+    except Exception as e:
+        print(f"    Warning: Error during cleanup: {str(e)}")
+        # Try to remove file even if CSV removal failed
+        if os.path.exists(file_path):
+            try:
+                os.remove(file_path)
+                print(f"    Deleted audio file: {file_path}")
+            except Exception as e2:
+                print(f"    Warning: Could not delete audio file {file_path}: {str(e2)}")
+
 def transcribe_audio_with_openai(args):
     """Transcribe a single audio file using OpenAI's Whisper API."""
     session, file_path = args
@@ -118,12 +181,21 @@ def transcribe_audio_with_openai(args):
                 print(f"    Full response saved to: {response_file}")
                 
                 text = response_data.get('text', '')
-                detected_language = response_data.get('language', '').lower()
+                detected_language = response_data.get('language')
                 
                 # First check if text has meaningful content
                 if not has_meaningful_content(text):
-                    print(f"    Skipping empty or meaningless text: {text}")
-                    return True, file_path, ''
+                    print(f"    Empty or meaningless text detected: {text}")
+                    cleanup_invalid_transcription(file_path, "Empty or meaningless text")
+                    return False, file_path, ''
+                
+                # Handle case where language detection failed
+                if not detected_language:
+                    print(f"    Language detection failed")
+                    cleanup_invalid_transcription(file_path, "Language detection failed")
+                    return False, file_path, ''
+                
+                detected_language = detected_language.lower()
                 
                 # Then check if OpenAI detected Indonesian
                 if detected_language == 'indonesian':
@@ -132,11 +204,13 @@ def transcribe_audio_with_openai(args):
                         print(f"    Valid Indonesian text detected: {text[:50]}...")
                         return True, file_path, text
                     else:
-                        print(f"    Skipping text with special characters: {text[:50]}...")
-                        return True, file_path, ''
+                        print(f"    Text contains special characters: {text[:50]}...")
+                        cleanup_invalid_transcription(file_path, "Contains special characters")
+                        return False, file_path, ''
                 else:
-                    print(f"    Skipping non-Indonesian segment (detected {detected_language}): {text[:50]}...")
-                    return True, file_path, ''
+                    print(f"    Non-Indonesian segment detected (language: {detected_language}): {text[:50]}...")
+                    cleanup_invalid_transcription(file_path, f"Non-Indonesian language: {detected_language}")
+                    return False, file_path, ''
                     
             elif response.status_code == 429:  # Rate limit
                 time.sleep(20)  # Wait longer for OpenAI rate limits
@@ -148,10 +222,26 @@ def transcribe_audio_with_openai(args):
 
 def transcribe_chunks(base_filename, model='openai/whisper-large', use_openai=False):
     """Transcribe all audio chunks in parallel and save to CSV."""
-    # Setup directories
-    result_dir = os.path.join(BASE_DATA_FOLDER, 'result', base_filename)
-    input_dir = os.path.join(result_dir, 'split')
-    csv_file_path = os.path.join(result_dir, f'{base_filename}_transcripts.csv')
+    if not base_filename:
+        print("Error: No base filename provided")
+        return False
+        
+    try:
+        # Setup directories
+        result_dir = os.path.join(BASE_DATA_FOLDER, 'result', base_filename)
+        if not os.path.exists(result_dir):
+            print(f"Error: Result directory not found: {result_dir}")
+            return False
+            
+        input_dir = os.path.join(result_dir, 'split')
+        if not os.path.exists(input_dir):
+            print(f"Error: Split directory not found: {input_dir}")
+            return False
+            
+        csv_file_path = os.path.join(result_dir, f'{base_filename}_transcripts.csv')
+    except Exception as e:
+        print(f"Error setting up directories: {str(e)}")
+        return False
     
     # Create result directory if it doesn't exist
     os.makedirs(result_dir, exist_ok=True)
@@ -170,36 +260,78 @@ def transcribe_chunks(base_filename, model='openai/whisper-large', use_openai=Fa
     print(f"Found {len(audio_files)} audio segments to transcribe")
     
     # Read timing information from silence points JSON
-    silence_points_file = os.path.join(BASE_DATA_FOLDER, 'silence_points', f'{base_filename}_silence_points.json')
-    if not os.path.exists(silence_points_file):
-        print(f"Error: Silence points file not found: {silence_points_file}")
-        return
-    
-    with open(silence_points_file, 'r') as f:
-        silence_info = json.load(f)
-    
-    # Create rows for each audio file with timing information
-    rows = []
-    for i, segment in enumerate(silence_info['segments']):
-        audio_file = f'{base_filename}_segment_{i:03d}.ogg'
-        rows.append({
-            'audio_file': f'split/{audio_file}',
-            'start_time_seconds': str(segment['start']),
-            'end_time_seconds': str(segment['end']),
-            'duration_seconds': str(segment['duration']),
-            'text': ''
-        })
+    try:
+        silence_points_file = os.path.join(BASE_DATA_FOLDER, 'silence_points', f'{base_filename}_silence_points.json')
+        if not os.path.exists(silence_points_file):
+            print(f"Error: Silence points file not found: {silence_points_file}")
+            return False
+        
+        with open(silence_points_file, 'r') as f:
+            silence_info = json.load(f)
+            
+        if not silence_info or 'segments' not in silence_info:
+            print(f"Error: Invalid silence points data in {silence_points_file}")
+            return False
+            
+        # Create rows for each audio file with timing information
+        rows = []
+        for i, segment in enumerate(silence_info['segments']):
+            if not isinstance(segment, dict) or not all(k in segment for k in ['start', 'end', 'duration']):
+                print(f"Error: Invalid segment data at index {i}")
+                continue
+                
+            audio_file = f'{base_filename}_segment_{i:03d}.ogg'
+            # Check if the audio file exists before adding to rows
+            audio_file_path = os.path.join(input_dir, audio_file)
+            if not os.path.exists(audio_file_path):
+                print(f"Warning: Audio file not found: {audio_file}")
+                continue
+                
+            rows.append({
+                'audio_file': f'split/{audio_file}',
+                'start_time_seconds': str(segment['start']),
+                'end_time_seconds': str(segment['end']),
+                'duration_seconds': str(segment['duration']),
+                'text': ''
+            })
+            
+        if not rows:
+            print("Error: No valid audio segments found")
+            return False
+            
+    except json.JSONDecodeError as e:
+        print(f"Error: Invalid JSON in silence points file: {str(e)}")
+        return False
+    except Exception as e:
+        print(f"Error processing silence points: {str(e)}")
+        return False
     
     # Prepare transcription arguments
     session = create_session()
     transcription_args = []
+    valid_rows = []
+    
     for row in rows:
         # Use OGG file for transcription
         audio_file_path = os.path.join(BASE_DATA_FOLDER, 'result', base_filename, row['audio_file'])
+        
+        # Skip if audio file doesn't exist
+        if not os.path.exists(audio_file_path):
+            print(f"\nSkipping missing audio file: {row['audio_file']}")
+            continue
+            
         if use_openai:
             transcription_args.append((session, audio_file_path))
         else:
             transcription_args.append((session, audio_file_path, model))
+        valid_rows.append(row)
+    
+    # Update rows to only include those with existing audio files
+    rows = valid_rows
+    
+    if not transcription_args:
+        print("No valid audio files found for transcription")
+        return False
     
     # Process transcriptions in parallel
     max_workers = min(multiprocessing.cpu_count() * 2, len(rows))  # Use 2x CPU cores
@@ -207,6 +339,10 @@ def transcribe_chunks(base_filename, model='openai/whisper-large', use_openai=Fa
     failed_transcriptions = []
     
     print(f"\nTranscribing {len(rows)} audio segments...")
+    if len(rows) == 0:
+        print("No audio segments to transcribe")
+        return False
+        
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         if use_openai:
             print("Using OpenAI Whisper API for transcription...")
@@ -227,10 +363,16 @@ def transcribe_chunks(base_filename, model='openai/whisper-large', use_openai=Fa
                 # Add small delay to avoid rate limiting
                 time.sleep(0.1)
     
-    # Update rows with transcriptions
+    # Update rows, excluding failed transcriptions
+    valid_rows = []
     for row in rows:
         audio_file_path = os.path.join(BASE_DATA_FOLDER, 'result', base_filename, row['audio_file'])
-        row['text'] = successful_transcriptions.get(audio_file_path, '')
+        if audio_file_path in successful_transcriptions:
+            row['text'] = successful_transcriptions[audio_file_path]
+            valid_rows.append(row)
+    
+    # Replace rows with only valid ones
+    rows = valid_rows
     
     # Sort rows by audio_file name
     def extract_segment_number(filename):

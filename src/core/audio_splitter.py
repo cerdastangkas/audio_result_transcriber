@@ -116,6 +116,9 @@ def is_segment_valid(input_file, start_time, duration, min_mean_volume=-35):
 
 def detect_silence_ffmpeg(input_file, silence_thresh=-35, min_silence_len=700):
     """Detect silence using FFmpeg's silencedetect filter."""
+    if not os.path.exists(input_file):
+        raise RuntimeError(f"Input file not found: {input_file}")
+        
     cmd = [
         'ffmpeg',
         '-i', input_file,
@@ -126,18 +129,57 @@ def detect_silence_ffmpeg(input_file, silence_thresh=-35, min_silence_len=700):
     
     try:
         result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        if result.returncode != 0:
+            raise RuntimeError(f"FFmpeg error: {result.stderr}")
+            
         output = result.stderr
-        
+        if not output:
+            raise RuntimeError("No output from FFmpeg silencedetect")
+            
         silence_starts = []
         silence_ends = []
         
         for line in output.splitlines():
-            if 'silence_start' in line:
-                time = float(re.search(r'silence_start: ([\d.]+)', line).group(1))
-                silence_starts.append(time)
-            elif 'silence_end' in line:
-                time = float(re.search(r'silence_end: ([\d.]+)', line).group(1))
-                silence_ends.append(time)
+            try:
+                if 'silence_start:' in line:
+                    match = re.search(r'silence_start:\s*([\d.]+)', line)
+                    if match:
+                        time = float(match.group(1))
+                        silence_starts.append(time)
+                elif 'silence_end:' in line:
+                    match = re.search(r'silence_end:\s*([\d.]+)', line)
+                    if match:
+                        time = float(match.group(1))
+                        silence_ends.append(time)
+            except (ValueError, AttributeError) as e:
+                print(f"Warning: Could not parse line: {line}")
+                continue
+        
+        if not silence_starts or not silence_ends:
+            print("Warning: No silence points detected. Using default split points.")
+            # Get audio duration
+            duration_cmd = [
+                'ffprobe',
+                '-v', 'error',
+                '-show_entries', 'format=duration',
+                '-of', 'default=noprint_wrappers=1:nokey=1',
+                input_file
+            ]
+            duration_result = subprocess.run(duration_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            if duration_result.returncode == 0:
+                duration = float(duration_result.stdout.strip())
+                # Create artificial split points every 10 seconds
+                split_interval = 10
+                silence_starts = list(range(0, int(duration), split_interval))[1:]
+                silence_ends = silence_starts
+            else:
+                raise RuntimeError(f"Could not get audio duration: {duration_result.stderr}")
+        
+        # Ensure ends list is same length as starts list
+        if len(silence_ends) < len(silence_starts):
+            silence_ends.extend([silence_ends[-1]] * (len(silence_starts) - len(silence_ends)))
+        elif len(silence_starts) < len(silence_ends):
+            silence_starts.extend([silence_starts[-1]] * (len(silence_ends) - len(silence_starts)))
         
         silence_points = list(zip(silence_starts, silence_ends))
         print(f"Detected {len(silence_points)} silence points")

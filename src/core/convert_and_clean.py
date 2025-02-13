@@ -36,6 +36,37 @@ def convert_audio_file(args):
     except Exception as e:
         return False, str(e)
 
+def update_csv_with_wav_paths(base_filename):
+    """Update the CSV file to use WAV file paths instead of OGG."""
+    csv_file_path = os.path.join(BASE_DATA_FOLDER, 'result', base_filename, f'{base_filename}_transcripts.csv')
+    if not os.path.exists(csv_file_path):
+        print(f"Error: Transcript file not found: {csv_file_path}")
+        return False
+    
+    # Read existing rows
+    rows = []
+    with open(csv_file_path, 'r', newline='') as csvfile:
+        reader = csv.DictReader(csvfile)
+        rows = list(reader)
+    
+    # Update file paths
+    updated_rows = []
+    for row in rows:
+        if 'audio_file' in row:
+            # Replace .ogg with .wav in the file path
+            row['audio_file'] = row['audio_file'].replace('.ogg', '.wav')
+        updated_rows.append(row)
+    
+    # Write updated CSV
+    fieldnames = ['audio_file', 'start_time_seconds', 'end_time_seconds', 'duration_seconds', 'text']
+    with open(csv_file_path, 'w', newline='') as csvfile:
+        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(updated_rows)
+    
+    print(f"Updated audio file paths in {csv_file_path}")
+    return True
+
 def convert_chunks_to_wav(base_filename):
     """Convert all audio chunks to WAV format in parallel and remove original OGG files."""
     input_dir = os.path.join(BASE_DATA_FOLDER, 'result', base_filename, 'split')
@@ -81,6 +112,10 @@ def convert_chunks_to_wav(base_filename):
         print(f"Failed to convert {len(failed_conversions)} files:")
         for error in failed_conversions:
             print(f"- {error}")
+    
+    # Update CSV file with WAV paths
+    if successful_conversions:
+        update_csv_with_wav_paths(base_filename)
     
     # Clean up temp folder if it exists
     temp_dir = os.path.join(input_dir, 'temp')
