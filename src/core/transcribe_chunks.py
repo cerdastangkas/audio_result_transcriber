@@ -86,8 +86,6 @@ def has_meaningful_content(text, duration_seconds=None):
     # Count words (split by whitespace after stripping punctuation)
     words = [w for w in re.sub(r'[.,!?;:\-]+', '', text.strip()).split() if w]
     word_count = len(words)
-    print(f"    Word count: {word_count}")
-    print(f"    Duration: {duration_seconds}")
     
     # Check if text has actual words
     if word_count == 0:
@@ -202,7 +200,9 @@ def transcribe_audio_with_openai(args):
             files = {
                 'file': f,
                 'model': (None, 'whisper-1'),
-                'response_format': (None, 'verbose_json')  # Get detailed response including language
+                'response_format': (None, 'verbose_json'),  # Get detailed response including language
+                'prompt': (None, 'This is mainly a conversation in Indonesian language audio file.'),
+                'temperature': (None, '0.13')
             }
             response = session.post(url, headers=headers, files=files)
             
@@ -213,7 +213,7 @@ def transcribe_audio_with_openai(args):
                 response_file = os.path.join(responses_dir, f'{os.path.basename(file_path)}_response.json')
                 with open(response_file, 'w', encoding='utf-8') as f:
                     json.dump(response_data, f, indent=2, ensure_ascii=False)
-                print(f"    Full response saved to: {response_file}")
+                # print(f"    Full response saved to: {response_file}")
                 
                 text = response_data.get('text', '')
                 detected_language = response_data.get('language')
@@ -221,14 +221,12 @@ def transcribe_audio_with_openai(args):
                 
                 # First check if text has meaningful content
                 if not has_meaningful_content(text, duration_seconds):
-                    print(f"    Empty or meaningless text detected: {text}")
-                    cleanup_invalid_transcription(file_path, "Empty or meaningless text")
+                    cleanup_invalid_transcription(file_path, f"Empty or meaningless text: {text}")
                     return False, file_path, '', 0.0
                 
                 # Handle case where language detection failed
                 if not detected_language:
-                    print(f"    Language detection failed")
-                    cleanup_invalid_transcription(file_path, "Language detection failed")
+                    cleanup_invalid_transcription(file_path, f"Language detection failed")
                     return False, file_path, '', 0.0
                 
                 detected_language = detected_language.lower()
@@ -237,14 +235,12 @@ def transcribe_audio_with_openai(args):
                 if detected_language == 'indonesian':
                     # Finally check for special characters
                     if has_no_special_characters(text):
-                        print(f"    Valid Indonesian text detected: {text[:50]}...")
+                        # print(f"    Valid Indonesian text detected: {text[:50]}...")
                         return True, file_path, text, duration_seconds
                     else:
-                        print(f"    Text contains special characters: {text[:50]}...")
-                        cleanup_invalid_transcription(file_path, "Contains special characters")
+                        cleanup_invalid_transcription(file_path, f"Contains special characters: {text}")
                         return False, file_path, '', 0.0
                 else:
-                    print(f"    Non-Indonesian segment detected (language: {detected_language}): {text[:50]}...")
                     cleanup_invalid_transcription(file_path, f"Non-Indonesian language: {detected_language}")
                     return False, file_path, '', 0.0
                     
@@ -328,7 +324,9 @@ def transcribe_chunks(base_filename, model='openai/whisper-large-v3', use_openai
                 'start_time_seconds': str(segment['start']),
                 'end_time_seconds': str(segment['end']),
                 'duration_seconds': str(segment['duration']),
-                'text': ''
+                'text': '',
+                'accepted_by_asix': '',
+                'rejected_reason': ''
             })
             
         if not rows:
@@ -408,6 +406,8 @@ def transcribe_chunks(base_filename, model='openai/whisper-large-v3', use_openai
         if audio_file_path in successful_transcriptions:
             row['text'] = successful_transcriptions[audio_file_path]
             row['duration_seconds'] = successful_durations[audio_file_path]
+            row['accepted_by_asix'] = ''
+            row['rejected_reason'] = ''
             valid_rows.append(row)
 
     # Replace rows with only valid ones
@@ -415,7 +415,6 @@ def transcribe_chunks(base_filename, model='openai/whisper-large-v3', use_openai
     
     # Sort rows by audio_file name
     def extract_segment_number(filename):
-        # Extract the segment number from filenames like 'video_segment_001.wav'
         import re
         match = re.search(r'segment_(\d+)', filename)
         return int(match.group(1)) if match else 0
@@ -423,7 +422,7 @@ def transcribe_chunks(base_filename, model='openai/whisper-large-v3', use_openai
     sorted_rows = sorted(rows, key=lambda x: extract_segment_number(x['audio_file']))
     
     # Write updated CSV
-    fieldnames = ['audio_file', 'start_time_seconds', 'end_time_seconds', 'duration_seconds', 'text']
+    fieldnames = ['audio_file', 'start_time_seconds', 'end_time_seconds', 'duration_seconds', 'text', 'accepted_by_asix', 'rejected_reason']
     with open(csv_file_path, mode='w', newline='') as updated_csv_file:
         csv_writer = csv.DictWriter(updated_csv_file, fieldnames=fieldnames)
         csv_writer.writeheader()

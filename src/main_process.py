@@ -115,7 +115,7 @@ def cleanup_temp_files(base_filename):
             except Exception as e:
                 logger.warning(f"Could not remove temp directory {temp_dir}: {e}")
 
-def process_audio_file(file_path, stats, use_openai=False):
+def process_audio_file(file_path, stats, use_openai=False, split_audio_only=False, transcribe_only=False):
     """Process a single audio file and update statistics."""
     base_filename = os.path.splitext(os.path.basename(file_path))[0]
     logger.info(f"\nProcessing {base_filename}...")
@@ -124,14 +124,20 @@ def process_audio_file(file_path, stats, use_openai=False):
         # Get duration for statistics
         duration = get_audio_duration(file_path)
         stats.add_file(file_path, duration)
-        
-        # Split audio into chunks (pass file path directly)
-        logger.info("Splitting audio into chunks...")
-        split_audio_at_silence(file_path, base_filename)
 
-        # Convert OGG to WAV and remove OGG files
-        logger.info("Converting chunks to WAV format...")
-        convert_chunks_to_wav(base_filename)
+        if not transcribe_only:
+            # Split audio into chunks (pass file path directly)
+            logger.info("Splitting audio into chunks...")
+            split_audio_at_silence(file_path, base_filename)
+
+            # Convert OGG to WAV and remove OGG files
+            logger.info("Converting chunks to WAV format...")
+            convert_chunks_to_wav(base_filename)
+
+            if split_audio_only:
+                stats.mark_success()
+                logger.info(f"Completed processing {base_filename} for split audio only")
+                return
         
         # Transcribe chunks (using OGG files)
         logger.info("Transcribing audio chunks...")
@@ -143,7 +149,7 @@ def process_audio_file(file_path, stats, use_openai=False):
     except Exception as e:
         stats.mark_failure(file_path, e)
 
-def process_directory(source_dir, archive_dir=None, use_openai=False):
+def process_directory(source_dir, archive_dir=None, use_openai=False, split_audio_only=False, transcribe_only=False):
     """Process all audio files in the source directory and track statistics."""
     stats = ProcessingStats()
     stats.start()
@@ -155,11 +161,11 @@ def process_directory(source_dir, archive_dir=None, use_openai=False):
     
     # Process each audio file
     for filename in sorted(os.listdir(source_dir)):
-        if filename.endswith(('.ogg', '.mp3')):
+        if filename.endswith(('.ogg', '.mp3', '.m4a')):
             file_path = os.path.join(source_dir, filename)
             
             # Process the file
-            process_audio_file(file_path, stats, use_openai)
+            process_audio_file(file_path, stats, use_openai, split_audio_only, transcribe_only)
             
             # Move to archive only if processing was successful and archive_dir is specified
             if archive_dir and file_path not in [f[0] for f in stats.failed_files]:
@@ -174,12 +180,16 @@ def process_directory(source_dir, archive_dir=None, use_openai=False):
 @click.argument('source_dir', type=click.Path(exists=True))
 @click.option('--archive-dir', type=click.Path(), help='Optional directory to move processed files to')
 @click.option('--use-openai', is_flag=True, help='Use OpenAI Whisper API instead of DeepInfra')
-def main(source_dir, archive_dir, use_openai):
+@click.option('--split-audio-only', is_flag=True, help='Only split audio, do not transcribe')
+@click.option('--transcribe-only', is_flag=True, help='Only transcribe audio, do not split')
+def main(source_dir, archive_dir, use_openai, split_audio_only, transcribe_only):
     """Process all audio files in the source directory and generate statistics."""
-    process_directory(source_dir, archive_dir, use_openai)
+    process_directory(source_dir, archive_dir, use_openai, split_audio_only, transcribe_only)
     update_actual_duration()
-    update_processing_status(os.path.join(BASE_DATA_FOLDER, 'youtube_videos_submitted.xlsx'))
-    compress_result_folders()
+
+    if not split_audio_only:
+        update_processing_status(os.path.join(BASE_DATA_FOLDER, 'youtube_videos_submitted.xlsx'))
+        compress_result_folders()
 
 if __name__ == '__main__':
     main()
