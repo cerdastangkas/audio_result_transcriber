@@ -189,7 +189,7 @@ def main(source_dir, archive_dir, use_openai, split_audio_only, transcribe_only)
 
     if not split_audio_only:
         update_processing_status(os.path.join(BASE_DATA_FOLDER, 'youtube_videos_submitted.xlsx'))
-        compress_result_folders()
+        # compress_result_folders()
 
 if __name__ == '__main__':
     main()

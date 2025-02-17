@@ -152,6 +152,15 @@ data/
 - `duration_seconds`: Duration of the segment
 - `text`: Transcribed text
 
+## Run in Background
+
+1. Run main_process.py in the background using nohup
+2. Redirect all output (both stdout and stderr) to processing.log
+3. Save the process ID to process.pid for easy management
+4. Provide helpful feedback about how to:
+   - Check the progress: tail -f processing.log
+   - Stop the process: kill $(cat process.pid)
+
 ## Configuration
 
 ### Environment Variables (.env)

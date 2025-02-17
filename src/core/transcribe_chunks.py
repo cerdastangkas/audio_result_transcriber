@@ -326,7 +326,8 @@ def transcribe_chunks(base_filename, model='openai/whisper-large-v3', use_openai
                 'duration_seconds': str(segment['duration']),
                 'text': '',
                 'accepted_by_asix': '',
-                'rejected_reason': ''
+                'rejected_reason': '',
+                'hyperjump_response': ''
             })
             
         if not rows:
@@ -408,6 +409,7 @@ def transcribe_chunks(base_filename, model='openai/whisper-large-v3', use_openai
             row['duration_seconds'] = successful_durations[audio_file_path]
             row['accepted_by_asix'] = ''
             row['rejected_reason'] = ''
+            row['hyperjump_response'] = ''
             valid_rows.append(row)
 
     # Replace rows with only valid ones
@@ -422,7 +424,7 @@ def transcribe_chunks(base_filename, model='openai/whisper-large-v3', use_openai
     sorted_rows = sorted(rows, key=lambda x: extract_segment_number(x['audio_file']))
     
     # Write updated CSV
-    fieldnames = ['audio_file', 'start_time_seconds', 'end_time_seconds', 'duration_seconds', 'text', 'accepted_by_asix', 'rejected_reason']
+    fieldnames = ['audio_file', 'start_time_seconds', 'end_time_seconds', 'duration_seconds', 'text', 'accepted_by_asix', 'rejected_reason', 'hyperjump_response']
     with open(csv_file_path, mode='w', newline='') as updated_csv_file:
         csv_writer = csv.DictWriter(updated_csv_file, fieldnames=fieldnames)
         csv_writer.writeheader()
