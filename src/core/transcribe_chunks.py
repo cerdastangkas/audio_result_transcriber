@@ -2,7 +2,10 @@ import os
 import json
 import requests
 import csv
+import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
+
+logger = logging.getLogger(__name__)
 from tqdm import tqdm
 import time
 from requests.adapters import HTTPAdapter
@@ -17,6 +20,7 @@ if src_dir not in sys.path:
     sys.path.append(src_dir)
 
 from utils.constants import BASE_DATA_FOLDER, OPENAI_API_KEY
+from utils.transcription_stats import TranscriptionStats
 
 # API keys
 DEEPINFRA_API_KEY = "your-api-key-here"
@@ -26,7 +30,7 @@ def create_session():
     session = requests.Session()
     retry_strategy = Retry(
         total=3,  # number of retries
-        backoff_factor=1,  # wait 1, 2, 4 seconds between retries
+        backoff_factor=5,  # wait 1, 2, 4 seconds between retries
         status_forcelist=[429, 500, 502, 503, 504]  # HTTP status codes to retry on
     )
     adapter = HTTPAdapter(max_retries=retry_strategy)
@@ -183,80 +187,114 @@ def cleanup_invalid_transcription(file_path, reason):
 def transcribe_audio_with_openai(args):
     """Transcribe a single audio file using OpenAI's Whisper API."""
     session, file_path = args
-    try:
-        url = 'https://api.openai.com/v1/audio/transcriptions'
-        headers = {
-            'Authorization': f'Bearer {OPENAI_API_KEY}'
-        }
-        
-        # Get video ID from file path
-        video_id = os.path.basename(os.path.dirname(os.path.dirname(file_path)))
-        
-        # Create centralized responses directory
-        responses_dir = os.path.join(BASE_DATA_FOLDER, 'openai_responses', video_id)
-        os.makedirs(responses_dir, exist_ok=True)
-        
-        with open(file_path, 'rb') as f:
-            files = {
-                'file': f,
-                'model': (None, 'whisper-1'),
-                'response_format': (None, 'verbose_json'),  # Get detailed response including language
-                'prompt': (None, 'This is mainly a conversation in Indonesian language audio file.'),
-                'temperature': (None, '0.13')
+    max_retries = 3
+    retry_count = 0
+    retry_delay = 20  # Initial delay in seconds
+    file_name = os.path.basename(file_path)
+
+    while retry_count < max_retries:
+        try:
+            if retry_count > 0:
+                logger.warning(f"[{file_name}] Retry attempt {retry_count}/{max_retries} after waiting {retry_delay}s")
+
+            url = 'https://api.openai.com/v1/audio/transcriptions'
+            headers = {
+                'Authorization': f'Bearer {OPENAI_API_KEY}'
             }
-            response = session.post(url, headers=headers, files=files)
+            logger.info(f"[{file_name}] Starting transcription attempt {retry_count + 1}/{max_retries}")
+        
+            # Get video ID from file path
+            video_id = os.path.basename(os.path.dirname(os.path.dirname(file_path)))
             
-            if response.status_code == 200:
-                response_data = response.json()
+            # Create centralized responses directory
+            responses_dir = os.path.join(BASE_DATA_FOLDER, 'openai_responses', video_id)
+            os.makedirs(responses_dir, exist_ok=True)
+            
+            with open(file_path, 'rb') as f:
+                files = {
+                    'file': f,
+                    'model': (None, 'whisper-1'),
+                    'response_format': (None, 'verbose_json'),  # Get detailed response including language
+                    'prompt': (None, 'This is mainly a conversation in Indonesian language audio file.'),
+                    'temperature': (None, '0.13')
+                }
+                response = session.post(url, headers=headers, files=files)
                 
-                # Save full response to JSON file
-                response_file = os.path.join(responses_dir, f'{os.path.basename(file_path)}_response.json')
-                with open(response_file, 'w', encoding='utf-8') as f:
-                    json.dump(response_data, f, indent=2, ensure_ascii=False)
-                # print(f"    Full response saved to: {response_file}")
-                
-                text = response_data.get('text', '')
-                detected_language = response_data.get('language')
-                duration_seconds = response_data.get('duration', None)
-                
-                # First check if text has meaningful content
-                if not has_meaningful_content(text, duration_seconds):
-                    cleanup_invalid_transcription(file_path, f"Empty or meaningless text: {text}")
-                    return False, file_path, '', 0.0
-                
-                # Handle case where language detection failed
-                if not detected_language:
-                    cleanup_invalid_transcription(file_path, f"Language detection failed")
-                    return False, file_path, '', 0.0
-                
-                detected_language = detected_language.lower()
-                
-                # Then check if OpenAI detected Indonesian
-                if detected_language == 'indonesian':
-                    # Finally check for special characters
-                    if has_no_special_characters(text):
-                        # print(f"    Valid Indonesian text detected: {text[:50]}...")
-                        return True, file_path, text, duration_seconds
-                    else:
-                        cleanup_invalid_transcription(file_path, f"Contains special characters: {text}")
-                        return False, file_path, '', 0.0
-                else:
-                    cleanup_invalid_transcription(file_path, f"Non-Indonesian language: {detected_language}")
-                    return False, file_path, '', 0.0
+                if response.status_code == 200:
+                    response_data = response.json()
                     
-            elif response.status_code == 429:  # Rate limit
-                time.sleep(20)  # Wait longer for OpenAI rate limits
-                return False, file_path, "Rate limit exceeded", 0.0
+                    # Save full response to JSON file
+                    response_file = os.path.join(responses_dir, f'{os.path.basename(file_path)}_response.json')
+                    with open(response_file, 'w', encoding='utf-8') as f:
+                        json.dump(response_data, f, indent=2, ensure_ascii=False)
+                    # print(f"    Full response saved to: {response_file}")
+                    
+                    text = response_data.get('text', '')
+                    detected_language = response_data.get('language')
+                    duration_seconds = response_data.get('duration', None)
+                    
+                    # First check if text has meaningful content
+                    if not has_meaningful_content(text, duration_seconds):
+                        cleanup_invalid_transcription(file_path, f"Empty or meaningless text: {text}")
+                        return False, file_path, '', 0.0
+                    
+                    # Handle case where language detection failed
+                    if not detected_language:
+                        cleanup_invalid_transcription(file_path, f"Language detection failed")
+                        return False, file_path, '', 0.0
+                    
+                    detected_language = detected_language.lower()
+                    
+                    # Then check if OpenAI detected Indonesian
+                    if detected_language == 'indonesian':
+                        # Finally check for special characters
+                        if has_no_special_characters(text):
+                            logger.info(f"[{file_name}] Success: Valid Indonesian text detected ({len(text)} chars, {duration_seconds:.1f}s)")
+                            return True, file_path, text, duration_seconds
+                        else:
+                            cleanup_invalid_transcription(file_path, f"Contains special characters: {text}")
+                            return False, file_path, '', 0.0
+                    else:
+                        cleanup_invalid_transcription(file_path, f"Non-Indonesian language: {detected_language}")
+                        return False, file_path, '', 0.0
+                        
+                elif response.status_code == 429:  # Rate limit
+                    retry_count += 1
+                    if retry_count < max_retries:
+                        logger.warning(f"[{file_name}] Rate limit hit. Waiting {retry_delay}s before retry {retry_count + 1}/{max_retries}")
+                        time.sleep(retry_delay)
+                        retry_delay *= 2  # Exponential backoff
+                        continue
+                    else:
+                        logger.error(f"[{file_name}] Failed: Rate limit exceeded after {max_retries} retries")
+                        return False, file_path, "Rate limit exceeded after max retries", 0.0
+                else:
+                    error_msg = f"OpenAI API error: {response.status_code} - {response.text}"
+                    logger.error(f"[{file_name}] Failed: {error_msg}")
+                    return False, file_path, error_msg, 0.0
+
+        except Exception as e:
+            retry_count += 1
+            if retry_count < max_retries:
+                logger.warning(f"[{file_name}] Error: {str(e)}. Waiting {retry_delay}s before retry {retry_count + 1}/{max_retries}")
+                time.sleep(retry_delay)
+                retry_delay *= 2  # Exponential backoff
+                continue
             else:
-                return False, file_path, f"Error {response.status_code}: {response.text}", 0.0
-    except Exception as e:
-        return False, file_path, str(e), 0.0
+                logger.error(f"[{file_name}] Failed: Error after {max_retries} retries - {str(e)}")
+                return False, file_path, f"Error after max retries: {str(e)}", 0.0
+
+    return False, file_path, "Failed after all retries", 0.0
 
 def transcribe_chunks(base_filename, model='openai/whisper-large-v3', use_openai=False):
     """Transcribe all audio chunks in parallel and save to CSV."""
     if not base_filename:
         print("Error: No base filename provided")
         return False
+        
+    # Initialize transcription statistics
+    stats = TranscriptionStats(base_filename)
+    stats.start()
         
     try:
         # Setup directories
@@ -273,6 +311,9 @@ def transcribe_chunks(base_filename, model='openai/whisper-large-v3', use_openai
         csv_file_path = os.path.join(result_dir, f'{base_filename}_transcripts.csv')
     except Exception as e:
         print(f"Error setting up directories: {str(e)}")
+        stats.add_failed_transcription('setup', str(e))
+        stats.finish()
+        stats.save_stats(result_dir)
         return False
     
     # Create result directory if it doesn't exist
@@ -286,59 +327,30 @@ def transcribe_chunks(base_filename, model='openai/whisper-large-v3', use_openai
     audio_files = [f for f in os.listdir(input_dir) if f.endswith('.wav') and 'segment' in f]
     if not audio_files:
         print(f"Error: No audio segments found in {input_dir}")
+        stats.finish()
+        stats.save_stats(result_dir)
         return
         
     audio_files.sort(key=lambda x: int(''.join(filter(str.isdigit, x))))
     print(f"Found {len(audio_files)} audio segments to transcribe")
     
-    # Read timing information from silence points JSON
-    try:
-        silence_points_file = os.path.join(BASE_DATA_FOLDER, 'silence_points', f'{base_filename}_silence_points.json')
-        if not os.path.exists(silence_points_file):
-            print(f"Error: Silence points file not found: {silence_points_file}")
-            return False
-        
-        with open(silence_points_file, 'r') as f:
-            silence_info = json.load(f)
+    # Create rows directly from audio files in split directory
+    rows = []
+    for audio_file in sorted(audio_files):
+        audio_file_path = os.path.join(input_dir, audio_file)
+        rows.append({
+            'audio_file': f'split/{audio_file}',
+            'start_time_seconds': '0',
+            'end_time_seconds': '0',  # We don't need exact timing for transcription
+            'duration_seconds': '0',
+            'text': '',
+            'accepted_by_asix': '',
+            'rejected_reason': '',
+            'hyperjump_response': ''
+        })
             
-        if not silence_info or 'segments' not in silence_info:
-            print(f"Error: Invalid silence points data in {silence_points_file}")
-            return False
-            
-        # Create rows for each audio file with timing information
-        rows = []
-        for i, segment in enumerate(silence_info['segments']):
-            if not isinstance(segment, dict) or not all(k in segment for k in ['start', 'end', 'duration']):
-                print(f"Error: Invalid segment data at index {i}")
-                continue
-                
-            audio_file = f'{base_filename}_segment_{i:03d}.wav'
-            # Check if the audio file exists before adding to rows
-            audio_file_path = os.path.join(input_dir, audio_file)
-            if not os.path.exists(audio_file_path):
-                print(f"Warning: Audio file not found: {audio_file}")
-                continue
-                
-            rows.append({
-                'audio_file': f'split/{audio_file}',
-                'start_time_seconds': str(segment['start']),
-                'end_time_seconds': str(segment['end']),
-                'duration_seconds': str(segment['duration']),
-                'text': '',
-                'accepted_by_asix': '',
-                'rejected_reason': '',
-                'hyperjump_response': ''
-            })
-            
-        if not rows:
-            print("Error: No valid audio segments found")
-            return False
-            
-    except json.JSONDecodeError as e:
-        print(f"Error: Invalid JSON in silence points file: {str(e)}")
-        return False
-    except Exception as e:
-        print(f"Error processing silence points: {str(e)}")
+    if not rows:
+        print("Error: No valid audio segments found")
         return False
     
     # Prepare transcription arguments
@@ -366,7 +378,12 @@ def transcribe_chunks(base_filename, model='openai/whisper-large-v3', use_openai
     
     if not transcription_args:
         print("No valid audio files found for transcription")
+        stats.finish()
+        stats.save_stats(result_dir)
         return False
+        
+    # Set total segments for statistics
+    stats.set_total_segments(len(transcription_args))
     
     # Process transcriptions in parallel
     max_workers = min(multiprocessing.cpu_count() * 2, len(rows))  # Use 2x CPU cores
@@ -393,8 +410,10 @@ def transcribe_chunks(base_filename, model='openai/whisper-large-v3', use_openai
                 if success:
                     successful_transcriptions[file_path] = result
                     successful_durations[file_path] = duration_seconds
+                    stats.add_successful_transcription(file_path, duration_seconds)
                 else:
                     failed_transcriptions.append((file_path, result))
+                    stats.add_failed_transcription(file_path, result)
                 pbar.update(1)
                 
                 # Add small delay to avoid rate limiting
@@ -430,14 +449,14 @@ def transcribe_chunks(base_filename, model='openai/whisper-large-v3', use_openai
         csv_writer.writeheader()
         csv_writer.writerows(rows)
     
-    # Report results
-    print(f"\nSuccessfully transcribed {len(successful_transcriptions)} segments")
-    if failed_transcriptions:
-        print(f"Failed to transcribe {len(failed_transcriptions)} segments:")
-        for path, error in failed_transcriptions:
-            print(f"- {os.path.basename(path)}: {error}")
+    # Update statistics and save
+    stats.finish()
+    stats.save_stats(result_dir)
+    stats.print_summary()
     
-    print(f"Transcriptions updated in {csv_file_path}")
+    # Report results
+    print(f"\nTranscriptions updated in {csv_file_path}")
+    return True
 
 # Example usage
 # transcribe_chunks('your_audio_file_name')

@@ -14,11 +14,29 @@ from utils.update_processing_status import update_processing_status
 from utils.compress_results import compress_result_folders
 
 # Setup logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
+log_dir = 'logs'
+os.makedirs(log_dir, exist_ok=True)
+
+# Create log file with timestamp
+timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+log_file = os.path.join(log_dir, f'transcription_{timestamp}.log')
+
+# Setup file handler
+file_handler = logging.FileHandler(log_file)
+file_handler.setLevel(logging.INFO)
+formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+file_handler.setFormatter(formatter)
+
+# Setup console handler
+console_handler = logging.StreamHandler()
+console_handler.setLevel(logging.INFO)
+console_handler.setFormatter(formatter)
+
+# Setup root logger
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
+logger.addHandler(file_handler)
+logger.addHandler(console_handler)
 
 class ProcessingStats:
     def __init__(self):
@@ -115,16 +133,16 @@ def cleanup_temp_files(base_filename):
             except Exception as e:
                 logger.warning(f"Could not remove temp directory {temp_dir}: {e}")
 
-def process_audio_file(file_path, stats, use_openai=False, split_audio_only=False, transcribe_only=False):
+def process_audio_file(file_path, stats, use_openai=False, split_audio_only=False, transcribe_only=False, base_filename=None):
     """Process a single audio file and update statistics."""
-    base_filename = os.path.splitext(os.path.basename(file_path))[0]
-    logger.info(f"\nProcessing {base_filename}...")
-    
-    try:
+    if not base_filename:
         # Get duration for statistics
         duration = get_audio_duration(file_path)
         stats.add_file(file_path, duration)
-
+        base_filename = os.path.splitext(os.path.basename(file_path))[0]
+    logger.info(f"\nProcessing {base_filename}...")
+    
+    try:
         if not transcribe_only:
             # Split audio into chunks (pass file path directly)
             logger.info("Splitting audio into chunks...")
@@ -149,7 +167,7 @@ def process_audio_file(file_path, stats, use_openai=False, split_audio_only=Fals
     except Exception as e:
         stats.mark_failure(file_path, e)
 
-def process_directory(source_dir, archive_dir=None, use_openai=False, split_audio_only=False, transcribe_only=False):
+def process_directory(source_dir, archive_dir=None, use_openai=False, split_audio_only=False, transcribe_only=False, base_filename=None):
     """Process all audio files in the source directory and track statistics."""
     stats = ProcessingStats()
     stats.start()
@@ -159,19 +177,30 @@ def process_directory(source_dir, archive_dir=None, use_openai=False, split_audi
         os.makedirs(archive_dir, exist_ok=True)
         logger.info(f"Created archive directory: {archive_dir}")
     
-    # Process each audio file
-    for filename in sorted(os.listdir(source_dir)):
-        if filename.endswith(('.ogg', '.mp3', '.m4a')):
-            file_path = os.path.join(source_dir, filename)
+    if transcribe_only and base_filename:
+        # For transcribe-only with base_filename, look in result directory
+        result_dir = os.path.join(BASE_DATA_FOLDER, 'result', base_filename)
+        if not os.path.exists(result_dir):
+            logger.error(f"Result directory not found for {base_filename}")
+            return
             
-            # Process the file
-            process_audio_file(file_path, stats, use_openai, split_audio_only, transcribe_only)
-            
-            # Move to archive only if processing was successful and archive_dir is specified
-            if archive_dir and file_path not in [f[0] for f in stats.failed_files]:
-                archive_path = os.path.join(archive_dir, filename)
-                os.rename(file_path, archive_path)
-                logger.info(f"Archived {filename}")
+        # Process the specified base_filename
+        logger.info(f"Processing transcribe-only for {base_filename}")
+        process_audio_file(None, stats, use_openai, split_audio_only, transcribe_only, base_filename=base_filename)
+    else:
+        # Process each audio file in source directory
+        for filename in sorted(os.listdir(source_dir)):
+            if filename.endswith(('.ogg', '.mp3', '.m4a', '.wav')):
+                file_path = os.path.join(source_dir, filename)
+                
+                # Process the file
+                process_audio_file(file_path, stats, use_openai, split_audio_only, transcribe_only)
+                
+                # Move to archive only if processing was successful and archive_dir is specified
+                if archive_dir and file_path not in [f[0] for f in stats.failed_files]:
+                    archive_path = os.path.join(archive_dir, filename)
+                    os.rename(file_path, archive_path)
+                    logger.info(f"Archived {filename}")
     
     stats.finish()
     stats.print_summary()
@@ -182,9 +211,10 @@ def process_directory(source_dir, archive_dir=None, use_openai=False, split_audi
 @click.option('--use-openai', is_flag=True, help='Use OpenAI Whisper API instead of DeepInfra')
 @click.option('--split-audio-only', is_flag=True, help='Only split audio, do not transcribe')
 @click.option('--transcribe-only', is_flag=True, help='Only transcribe audio, do not split')
-def main(source_dir, archive_dir, use_openai, split_audio_only, transcribe_only):
+@click.option('--base-filename', type=str, help='Base filename for transcribe-only mode')
+def main(source_dir, archive_dir, use_openai, split_audio_only, transcribe_only, base_filename):
     """Process all audio files in the source directory and generate statistics."""
-    process_directory(source_dir, archive_dir, use_openai, split_audio_only, transcribe_only)
+    process_directory(source_dir, archive_dir, use_openai, split_audio_only, transcribe_only, base_filename)
     update_actual_duration()
 
     if not split_audio_only:

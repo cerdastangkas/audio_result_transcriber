@@ -158,8 +158,33 @@ data/
 2. Redirect all output (both stdout and stderr) to processing.log
 3. Save the process ID to process.pid for easy management
 4. Provide helpful feedback about how to:
-   - Check the progress: tail -f processing.log
+   - Check the progress: tail -f processing`.log
    - Stop the process: kill $(cat process.pid)
+
+### Command-Line Usage
+## staging
+Process started with PID: 4153823
+Output is being logged to: processing.log
+To check the progress, use: tail -f processing.log
+To stop the process, use: kill 4153823
+
+## Lukman
+Process started with PID: 2245747
+Output is being logged to: processing.log
+To check the progress, use: tail -f processing.log
+To stop the process, use: kill 2245747
+
+## kevin
+Process started with PID: 887110
+Output is being logged to: processing.log
+To check the progress, use: tail -f processing.log
+To stop the process, use: kill 887110
+
+## download muslim
+Process started with PID: 1555719
+Output is being logged to: processing.log
+To check the progress, use: tail -f processing.log
+To stop the process, use: kill 1555719
 
 ## Configuration
 
